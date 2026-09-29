@@ -1,0 +1,37 @@
+naics,industry,year,score_equal,rank_equal,score_entropy,rank_entropy,score_ahp,rank_ahp
+3241,Petroleum and coal products,2019,0.1051,6.0,0.1627,6.0,0.1009,6.0
+3241,Petroleum and coal products,2020,0.3258,5.0,0.5039,1.0,0.2924,5.0
+3241,Petroleum and coal products,2021,0.1431,6.0,0.2105,6.0,0.1375,6.0
+3241,Petroleum and coal products,2022,0.2156,6.0,0.3613,4.0,0.2018,6.0
+3241,Petroleum and coal products,2023,0.1471,6.0,0.2406,6.0,0.1346,6.0
+3241,Petroleum and coal products,2024,0.1162,6.0,0.1918,6.0,0.1025,6.0
+3251,Basic chemicals,2019,0.4939,1.0,0.4281,1.0,0.5225,1.0
+3251,Basic chemicals,2020,0.5444,1.0,0.473,2.0,0.5801,1.0
+3251,Basic chemicals,2021,0.457,1.0,0.4029,1.0,0.4955,1.0
+3251,Basic chemicals,2022,0.4692,2.0,0.4257,2.0,0.4986,3.0
+3251,Basic chemicals,2023,0.4358,1.0,0.3836,1.0,0.4503,2.0
+3251,Basic chemicals,2024,0.3798,2.0,0.3405,1.0,0.3823,2.0
+3252,Resins and synthetic rubber,2019,0.4194,2.0,0.3389,2.0,0.4327,2.0
+3252,Resins and synthetic rubber,2020,0.4072,2.0,0.3436,3.0,0.4103,2.0
+3252,Resins and synthetic rubber,2021,0.4324,2.0,0.3761,2.0,0.4663,2.0
+3252,Resins and synthetic rubber,2022,0.4376,3.0,0.3755,3.0,0.4684,4.0
+3252,Resins and synthetic rubber,2023,0.4334,3.0,0.3783,2.0,0.4298,3.0
+3252,Resins and synthetic rubber,2024,0.3774,3.0,0.3165,2.0,0.3814,3.0
+3253,Fertilizers and pesticides,2019,0.3826,3.0,0.3127,3.0,0.4057,3.0
+3253,Fertilizers and pesticides,2020,0.2919,6.0,0.2242,5.0,0.2987,4.0
+3253,Fertilizers and pesticides,2021,0.3479,4.0,0.2761,3.0,0.3991,3.0
+3253,Fertilizers and pesticides,2022,0.4902,1.0,0.4277,1.0,0.5828,1.0
+3253,Fertilizers and pesticides,2023,0.3649,4.0,0.313,3.0,0.3941,4.0
+3253,Fertilizers and pesticides,2024,0.3007,5.0,0.224,5.0,0.3278,4.0
+3259,Other chemical products,2019,0.3369,4.0,0.2036,5.0,0.3608,4.0
+3259,Other chemical products,2020,0.3454,4.0,0.2141,6.0,0.3576,3.0
+3259,Other chemical products,2021,0.3593,3.0,0.2304,5.0,0.3918,4.0
+3259,Other chemical products,2022,0.4294,4.0,0.2726,5.0,0.515,2.0
+3259,Other chemical products,2023,0.4356,2.0,0.2727,4.0,0.507,1.0
+3259,Other chemical products,2024,0.4475,1.0,0.2743,3.0,0.5272,1.0
+3261,Plastics products,2019,0.3324,5.0,0.22,4.0,0.2538,5.0
+3261,Plastics products,2020,0.3663,3.0,0.2419,4.0,0.2877,6.0
+3261,Plastics products,2021,0.347,5.0,0.2337,4.0,0.2854,5.0
+3261,Plastics products,2022,0.3383,5.0,0.2302,6.0,0.2737,5.0
+3261,Plastics products,2023,0.3635,5.0,0.2455,5.0,0.2774,5.0
+3261,Plastics products,2024,0.3741,4.0,0.2494,4.0,0.292,5.0

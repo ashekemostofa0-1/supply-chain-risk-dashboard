@@ -1,0 +1,5 @@
+indicator,equal,entropy,ahp
+import_dep,0.25,0.1392,0.4236
+energy_int,0.25,0.2631,0.227
+labor_int,0.25,0.1544,0.1223
+price_vol,0.25,0.4433,0.227
