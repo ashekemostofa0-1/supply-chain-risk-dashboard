@@ -1,0 +1,37 @@
+naics,industry,year,import_dep,energy_int,labor_int,price_vol,source,flags
+3241,Petroleum and coal products,2019,0.0457,0.0,0.0338,0.3409,ASM,
+3241,Petroleum and coal products,2020,0.0475,0.1333,0.1223,1.0,ASM,
+3241,Petroleum and coal products,2021,0.0543,0.1004,0.03,0.3877,ASM,
+3241,Petroleum and coal products,2022,0.0302,0.0661,0.0,0.7663,Economic Census,
+3241,Petroleum and coal products,2023,0.0144,0.0602,0.0172,0.4965,AIES,revenue_not_shipments
+3241,Petroleum and coal products,2024,0.0,0.0321,0.0297,0.4032,AIES,revenue_not_shipments
+3251,Basic chemicals,2019,0.5572,1.0,0.3392,0.0792,ASM,
+3251,Basic chemicals,2020,0.6542,0.9708,0.4102,0.1426,ASM,
+3251,Basic chemicals,2021,0.5513,0.9032,0.2667,0.1069,ASM,
+3251,Basic chemicals,2022,0.5041,0.9968,0.2542,0.1218,Economic Census,
+3251,Basic chemicals,2023,0.435,0.9512,0.2958,0.0611,AIES,revenue_not_shipments
+3251,Basic chemicals,2024,0.346,0.795,0.2924,0.0857,AIES,revenue_not_shipments
+3252,Resins and synthetic rubber,2019,0.498,0.7007,0.4395,0.0393,ASM,
+3252,Resins and synthetic rubber,2020,0.4619,0.5508,0.4803,0.1358,ASM,
+3252,Resins and synthetic rubber,2021,0.5728,0.6046,0.372,0.1801,ASM,
+3252,Resins and synthetic rubber,2022,0.5585,0.686,0.3704,0.1354,Economic Census,
+3252,Resins and synthetic rubber,2023,0.4073,0.8072,0.4186,0.1005,AIES,revenue_not_shipments
+3252,Resins and synthetic rubber,2024,0.4169,0.5917,0.4129,0.088,AIES,revenue_not_shipments
+3253,Fertilizers and pesticides,2019,0.5142,0.5062,0.409,0.1012,ASM,
+3253,Fertilizers and pesticides,2020,0.3835,0.3422,0.3985,0.0434,ASM,
+3253,Fertilizers and pesticides,2021,0.5897,0.3948,0.3123,0.0947,ASM,
+3253,Fertilizers and pesticides,2022,0.8563,0.5346,0.2932,0.2767,Economic Census,
+3253,Fertilizers and pesticides,2023,0.501,0.4604,0.3415,0.1565,AIES,revenue_not_shipments
+3253,Fertilizers and pesticides,2024,0.4778,0.3089,0.3743,0.0416,AIES,revenue_not_shipments
+3259,Other chemical products,2019,0.6343,0.0445,0.6674,0.0014,ASM,
+3259,Other chemical products,2020,0.6003,0.064,0.7066,0.0106,ASM,
+3259,Other chemical products,2021,0.6825,0.0546,0.6553,0.0449,ASM,
+3259,Other chemical products,2022,0.9776,0.0349,0.6411,0.0641,Economic Census,
+3259,Other chemical products,2023,0.9409,0.0593,0.7024,0.0399,AIES,revenue_not_shipments
+3259,Other chemical products,2024,1.0,0.0344,0.7233,0.0325,AIES,revenue_not_shipments
+3261,Plastics products,2019,0.245,0.1639,0.9186,0.0021,ASM,
+3261,Plastics products,2020,0.3003,0.1631,0.9927,0.0089,ASM,
+3261,Plastics products,2021,0.3233,0.1447,0.8902,0.0297,ASM,
+3261,Plastics products,2022,0.2968,0.1446,0.8768,0.0349,Economic Census,
+3261,Plastics products,2023,0.2507,0.229,0.9742,0.0,AIES,revenue_not_shipments
+3261,Plastics products,2024,0.2896,0.2052,1.0,0.0018,AIES,revenue_not_shipments
