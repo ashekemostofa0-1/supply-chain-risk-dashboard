@@ -27,6 +27,7 @@ The scope is defined in `src/config.py`.
 data/raw/            downloaded files, untouched
 data/clean/          merged dataset
 src/config.py        scope: industries and years
+src/download_data.py downloads raw data (Step 5)
 src/build_dataset.py cleaning + merging
 src/risk_index.py    the 3 weighting methods
 src/validate.py      testing the methods
@@ -44,6 +45,33 @@ python check_setup.py
 pytest
 streamlit run app.py
 ```
+
+## Clean dataset (Step 6)
+
+`python -m src.build_dataset` writes `data/clean/risk_indicators.csv`: one row per
+industry per year (6 industries x 2019-2024 = 36 rows).
+
+| Column | Definition |
+|---|---|
+| import_dep | imports / (shipments + imports - exports) |
+| energy_int | (purchased electricity + purchased fuels) / shipments |
+| labor_int | annual payroll / shipments |
+| price_vol | std. dev. of month-to-month % change in the industry PPI within the year (percentage points) |
+| source | Census survey behind shipments, payroll and energy: ASM (2019-21), Economic Census (2022), AIES (2023-24) |
+| flags | reasons a value is blank or needs care |
+
+**Missing data policy: leave blank and flag, never interpolate.** With only six years
+per industry, interpolation would invent values in the 2020-2022 disruption years, which
+are the years the analysis cares about most. A blank cell with a reason in `flags` keeps
+the gap visible. In the current download no indicator cell is blank.
+
+**Known series break:** AIES (2023-2024) reports total revenue rather than value of
+shipments, so those rows carry the flag `revenue_not_shipments`. The ratios are
+comparable in size to earlier years, but small level shifts in 2023 may reflect the
+survey change rather than a real change in the industry.
+
+**Proxy:** industrial production for NAICS 3259 uses the published aggregate 3255+3259.
+The raw numbers behind every ratio are in `data/clean/risk_inputs.csv`.
 
 <!-- SOURCES START -->
 ## Data sources

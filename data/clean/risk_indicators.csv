@@ -1,0 +1,37 @@
+naics,industry,year,import_dep,energy_int,labor_int,price_vol,source,flags
+3241,Petroleum and coal products,2019,0.111213,0.0133,0.019241,4.921904,ASM,
+3241,Petroleum and coal products,2020,0.111745,0.017906,0.032793,14.103992,ASM,
+3241,Petroleum and coal products,2021,0.11381,0.016767,0.018658,5.573129,ASM,
+3241,Petroleum and coal products,2022,0.106543,0.015583,0.014075,10.848139,Economic Census,
+3241,Petroleum and coal products,2023,0.101777,0.015381,0.016703,7.089325,AIES,revenue_not_shipments
+3241,Petroleum and coal products,2024,0.097431,0.014409,0.018612,5.789227,AIES,revenue_not_shipments
+3251,Basic chemicals,2019,0.265502,0.047843,0.065973,1.275461,ASM,
+3251,Basic chemicals,2020,0.294748,0.046833,0.076839,2.159136,ASM,
+3251,Basic chemicals,2021,0.263724,0.044498,0.054876,1.661352,ASM,
+3251,Basic chemicals,2022,0.249485,0.047734,0.052965,1.869733,Economic Census,
+3251,Basic chemicals,2023,0.228646,0.046156,0.059332,1.023367,AIES,revenue_not_shipments
+3251,Basic chemicals,2024,0.201786,0.040762,0.058812,1.365959,AIES,revenue_not_shipments
+3252,Resins and synthetic rubber,2019,0.247633,0.037503,0.081327,0.719349,ASM,
+3252,Resins and synthetic rubber,2020,0.236755,0.032326,0.087569,2.064423,ASM,
+3252,Resins and synthetic rubber,2021,0.270199,0.034183,0.070987,2.681941,ASM,
+3252,Resins and synthetic rubber,2022,0.265898,0.036998,0.07074,2.059324,Economic Census,
+3252,Resins and synthetic rubber,2023,0.220288,0.041184,0.078127,1.572816,AIES,revenue_not_shipments
+3252,Resins and synthetic rubber,2024,0.223176,0.033738,0.07725,1.39906,AIES,revenue_not_shipments
+3253,Fertilizers and pesticides,2019,0.252522,0.030784,0.076657,1.582145,ASM,
+3253,Fertilizers and pesticides,2020,0.213102,0.025121,0.075044,0.777041,ASM,
+3253,Fertilizers and pesticides,2021,0.275309,0.026936,0.061856,1.49167,ASM,
+3253,Fertilizers and pesticides,2022,0.35572,0.031766,0.058935,4.026932,Economic Census,
+3253,Fertilizers and pesticides,2023,0.248552,0.029204,0.066322,2.353056,AIES,revenue_not_shipments
+3253,Fertilizers and pesticides,2024,0.241556,0.023972,0.071341,0.751951,AIES,revenue_not_shipments
+3259,Other chemical products,2019,0.288766,0.014838,0.116184,0.192588,ASM,
+3259,Other chemical products,2020,0.278505,0.015512,0.122182,0.31957,ASM,
+3259,Other chemical products,2021,0.303306,0.015185,0.114332,0.79778,ASM,
+3259,Other chemical products,2022,0.392324,0.014505,0.112164,1.064992,Economic Census,
+3259,Other chemical products,2023,0.381241,0.01535,0.121545,0.72825,AIES,revenue_not_shipments
+3259,Other chemical products,2024,0.399068,0.014487,0.124741,0.625517,AIES,revenue_not_shipments
+3261,Plastics products,2019,0.171327,0.018962,0.154631,0.201821,ASM,
+3261,Plastics products,2020,0.188011,0.018935,0.165963,0.296965,ASM,
+3261,Plastics products,2021,0.194961,0.018298,0.150285,0.586002,ASM,
+3261,Plastics products,2022,0.186944,0.018296,0.148232,0.658732,Economic Census,
+3261,Plastics products,2023,0.173063,0.02121,0.163125,0.172458,AIES,revenue_not_shipments
+3261,Plastics products,2024,0.184785,0.020388,0.167078,0.197115,AIES,revenue_not_shipments
