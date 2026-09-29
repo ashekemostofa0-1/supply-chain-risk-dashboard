@@ -6,3 +6,5 @@ __pycache__/
 .vscode/
 *.xlsx~
 .DS_Store
+census_api_key.txt
+.env
