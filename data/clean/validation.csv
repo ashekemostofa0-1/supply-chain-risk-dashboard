@@ -1,0 +1,7 @@
+naics,industry,score_equal,score_entropy,score_ahp,ip_series,drop_annual,drop_trough,rank_equal,rank_entropy,rank_ahp,rank_actual
+3241,Petroleum and coal products,0.1051,0.1627,0.1009,IPG324S,0.2121,0.3068,6,6,6,1
+3251,Basic chemicals,0.4939,0.4281,0.5225,IPG3251S,0.0567,0.1393,1,1,1,3
+3252,Resins and synthetic rubber,0.4194,0.3389,0.4327,IPG3252S,0.0631,0.1156,2,2,2,2
+3253,Fertilizers and pesticides,0.3826,0.3127,0.4057,IPG3253S,-0.1168,-0.0655,3,3,3,6
+3259,Other chemical products,0.3369,0.2036,0.3608,IPG3255A9S,0.0405,0.0991,4,5,4,4
+3261,Plastics products,0.3324,0.22,0.2538,IPG3261S,0.0349,0.1377,5,4,5,5
