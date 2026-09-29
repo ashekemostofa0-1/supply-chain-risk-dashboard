@@ -13,6 +13,9 @@ import streamlit as st
 
 from src.config import INDUSTRIES, YEARS
 from src.dashboard import LABELS, METHODS, comparison, contributions, load, scored, what_if
+from globe_component import render_globe
+from live_panel import render_live_panel
+from ui_style import apply_style, hero
 
 # Colors: one fixed color per method (never re-assigned), neutral grey for context.
 METHOD_COLORS = {"Equal": "#2a78d6", "Entropy": "#eb6834", "AHP": "#1baf7a"}
@@ -20,6 +23,7 @@ GREY = "#898781"
 CLEAN = "data/clean"
 
 st.set_page_config(page_title="Supply Chain Risk Dashboard", layout="wide")
+apply_style()
 
 
 @st.cache_data
@@ -39,16 +43,29 @@ method_name = st.sidebar.radio("Weighting method", list(METHODS), index=0, horiz
 method = METHODS[method_name]
 st.sidebar.caption(
     "Scores run from 0 (lowest exposure in the 2019-2024 panel) to 1 (highest). "
-    "Data: Census ASM / Economic Census / AIES, Census trade, FRED."
+    "Data: Census ASM / Economic Census / AIES, Census trade, FRED. "
+    "Live signals: NWS alerts, EIA prices and refinery data, IMF PortWatch."
 )
 
 industry = INDUSTRIES[naics]
 table, weights = scored(df, method)
 row = table[(table["naics"] == naics) & (table["year"] == year)].iloc[0]
 
-st.title("Supply Chain Risk Dashboard")
-st.caption(f"U.S. chemical and plastics manufacturing, 6 industries (4-digit NAICS), 2019-2024. "
-           f"Method: **{method_name}** weights.")
+# ------------------------------- header + globe -------------------------------
+left, right = st.columns([1.1, 1], gap="large")
+with left:
+    hero("Supply Chain Risk Dashboard",
+         "Structural supply-chain risk for U.S. oil and gas related manufacturing, "
+         "combined with live signals from weather alerts, energy prices, refineries and ports.",
+         badges=[f"{len(INDUSTRIES)} industries", "4-digit NAICS", f"{min(YEARS)} to {max(YEARS)}",
+                 f"Method: {method_name}"])
+with right:
+    render_globe(height=460)
+
+# ------------------------------- live early warning -------------------------------
+# The live alert uses the most recent structural score, not the year on the slider.
+latest = table[(table["naics"] == naics) & (table["year"] == max(YEARS))]
+render_live_panel(industry, float(latest["score"].iloc[0]) if not latest.empty else float(row["score"]))
 
 # ------------------------------- panel 1 -------------------------------
 st.subheader(f"1. Risk score: {industry}, {year}")
@@ -157,7 +174,8 @@ st.caption(f"Import dependence is multiplied by (1 + {pct}/100), capped at 100%,
 with st.expander("Model checks (Steps 10-12)"):
     files = {"Validation vs 2020 output drop": "validation_summary.csv",
              "Agreement between methods, by industry": "agreement_by_industry.csv",
-             "Sensitivity: drop one indicator": "sensitivity.csv"}
+             "Sensitivity: drop one indicator": "sensitivity.csv",
+             "Backtest of live alert rules (python backtest.py)": "backtest_summary.csv"}
     for title, f in files.items():
         path = os.path.join(CLEAN, f)
         if os.path.exists(path):
