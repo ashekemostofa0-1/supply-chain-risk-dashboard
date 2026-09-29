@@ -40,3 +40,20 @@ def test_agreement_tables_are_complete():
     assert len(by_ind) == len(INDUSTRIES)
     assert set(by_ind["verdict"]) <= {"robust high risk", "robust low risk",
                                       "method-dependent", "stable middle"}
+
+
+# ---------------- Step 12: sensitivity ----------------
+from src.validate import sensitivity
+
+
+def test_sensitivity_full_model_is_perfectly_stable():
+    sens = sensitivity().set_index("dropped")
+    for m in METHODS:
+        assert abs(sens.loc["none", f"{m}_stability"] - 1) < 1e-9
+        assert sens.loc["none", f"{m}_top_flips"] == 0
+
+
+def test_sensitivity_has_one_row_per_dropped_indicator_and_ahp_stays_consistent():
+    sens = sensitivity()
+    assert list(sens["dropped"]) == ["none", "import_dep", "energy_int", "labor_int", "price_vol"]
+    assert (sens["ahp_cr"] < 0.10).all()

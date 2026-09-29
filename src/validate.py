@@ -1,5 +1,6 @@
 """Step 10: validation test - which weighting method predicted real disruption best?
 Step 11: agreement test - do the three methods rank the industries the same way?
+Step 12: sensitivity test - drop one indicator at a time and recalculate.
 
 Run from the project folder:
     python -m src.validate
@@ -37,6 +38,15 @@ Step 11 agreement test
           "method-dependent"  in the same year, the methods disagree by 3+ places at least once
           "stable middle"     everything else
 
+Step 12 sensitivity test
+    For each indicator, remove it, rebuild all three methods on the remaining three
+    (equal = 1/3 each, entropy recomputed, AHP = same matrix without that row/column, CR
+    rechecked), and rescore 2019-2024. For each method report:
+      stability  mean Spearman (over the 6 years) between the full ranking and the reduced one.
+                 Near 1 = the dropped indicator changes little. Low = it was doing most of the work.
+      top_flips  number of years (of 6) where the #1 riskiest industry changes.
+      valid_rho  Step 10 validation rho (2019 score vs 2020 output drop) without that indicator.
+
 Caution for the report
     With only six industries, a correlation needs to be about 0.89 or higher to be
     statistically significant at the 5% level, so p-values are printed but the result
@@ -50,7 +60,8 @@ from scipy.stats import spearmanr
 
 from src.config import CLEAN_DIR, INDUSTRIES, RAW_DIR
 from src.download_data import IP_SERIES
-from src.risk_index import build_scores, load_indicators
+from src.risk_index import (AHP_MATRIX, INDICATORS, ahp_weights, build_scores, entropy_weights,
+                            equal_weights, load_indicators, normalize, score)
 
 METHODS = ["equal", "entropy", "ahp"]
 BASE_YEAR, SHOCK_YEAR = 2019, 2020
@@ -58,6 +69,7 @@ OUT_FILE = os.path.join(CLEAN_DIR, "validation.csv")
 OUT_SUMMARY = os.path.join(CLEAN_DIR, "validation_summary.csv")
 OUT_AGREE_YEAR = os.path.join(CLEAN_DIR, "agreement_by_year.csv")
 OUT_AGREE_IND = os.path.join(CLEAN_DIR, "agreement_by_industry.csv")
+OUT_SENS = os.path.join(CLEAN_DIR, "sensitivity.csv")
 
 
 def output_drops():
@@ -146,6 +158,54 @@ def agreement():
     return by_year, by_ind
 
 
+# ----------------------------- Step 12: sensitivity -----------------------------
+
+def weights_for(norm, cols):
+    """Equal, entropy and AHP weights using only `cols` (AHP sub-matrix keeps your judgments)."""
+    idx = [INDICATORS.index(c) for c in cols]
+    sub = [[AHP_MATRIX[i][j] for j in idx] for i in idx]
+    ahp, info = ahp_weights(sub, cols)
+    w = {"equal": equal_weights(cols), "entropy": entropy_weights(norm, cols), "ahp": ahp}
+    return w, info["CR"]
+
+
+def ranks_by_year(norm, w):
+    s = norm[["naics", "year"]].copy()
+    s["score"] = score(norm, w)
+    s["rank"] = s.groupby("year")["score"].rank(ascending=False, method="min")
+    return s
+
+
+def sensitivity():
+    """One row per dropped indicator ('none' = full model), columns per method."""
+    df = load_indicators()
+    norm = normalize(df, INDICATORS)
+    drops = output_drops().set_index("naics")["drop_annual"]
+    full_w, _ = weights_for(norm, INDICATORS)
+    full = {m: ranks_by_year(norm, full_w[m]) for m in METHODS}
+
+    rows = []
+    for dropped in ["none"] + INDICATORS:
+        cols = [c for c in INDICATORS if c != dropped]
+        w, cr = weights_for(norm, cols)
+        row = {"dropped": dropped, "ahp_cr": max(cr, 0.0)}  # tiny negative = rounding
+        for m in METHODS:
+            r = ranks_by_year(norm, w[m])
+            stab, flips = [], 0
+            for year in sorted(r["year"].unique()):
+                a = full[m][full[m]["year"] == year].set_index("naics")
+                b = r[r["year"] == year].set_index("naics").loc[a.index]
+                stab.append(spearmanr(a["score"], b["score"])[0])
+                if a["score"].idxmax() != b["score"].idxmax():
+                    flips += 1
+            pre = r[r["year"] == BASE_YEAR].set_index("naics")["score"]
+            row[f"{m}_stability"] = sum(stab) / len(stab)
+            row[f"{m}_top_flips"] = flips
+            row[f"{m}_valid_rho"] = spearmanr(pre, drops.loc[pre.index])[0]
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def main():
     table, summary = validate()
     os.makedirs(CLEAN_DIR, exist_ok=True)
@@ -176,6 +236,26 @@ def main():
     print("\nPer industry, across all 18 method-year rankings (rank 1 = riskiest):")
     print(by_ind.round(2).to_string(index=False))
     print(f"Saved {OUT_AGREE_YEAR} and {OUT_AGREE_IND}")
+
+    sens = sensitivity()
+    sens.round(4).to_csv(OUT_SENS, index=False)
+    print("\n=== Step 12: sensitivity - drop one indicator at a time ===")
+    table = pd.DataFrame({"dropped": sens["dropped"]})
+    for m in METHODS:
+        table[f"stab_{m}"] = sens[f"{m}_stability"]
+    for m in METHODS:
+        table[f"flips_{m}"] = sens[f"{m}_top_flips"]
+    for m in METHODS:
+        table[f"rho_{m}"] = sens[f"{m}_valid_rho"]
+    print("stab  = mean Spearman vs the full ranking over 2019-2024 (1 = unchanged, low = that")
+    print("        indicator was doing most of the work)")
+    print("flips = years (of 6) where the #1 riskiest industry changes")
+    print("rho   = Step 10 validation (2019 score vs actual 2020 output drop)\n")
+    print(table.round(2).to_string(index=False))
+    print()
+    print(f"AHP consistency ratio after each drop: "
+          + ", ".join(f"{d}={cr:.3f}" for d, cr in zip(sens["dropped"], sens["ahp_cr"])))
+    print(f"Saved {OUT_SENS}")
 
 
 if __name__ == "__main__":
