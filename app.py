@@ -105,10 +105,12 @@ st.subheader(f"3. All industries, three methods side by side ({year})")
 comp = comparison(df, year)
 order = comp[comp["method"] == method_name].sort_values("score")["industry"].tolist()
 fig3 = go.Figure()
-for name in METHODS:
+# Plotly stacks horizontal group bars bottom-up, so add them in reverse to read
+# Equal / Entropy / AHP from top to bottom, matching the legend (legendrank keeps its order).
+for i, name in enumerate(reversed(list(METHODS))):
     t = comp[comp["method"] == name].set_index("industry").loc[order]
     fig3.add_trace(go.Bar(
-        y=t.index, x=t["score"], name=name, orientation="h",
+        y=t.index, x=t["score"], name=name, orientation="h", legendrank=3 - i,
         marker_color=METHOD_COLORS[name],
         customdata=t["rank"], hovertemplate=f"<b>%{{x:.3f}}</b> {name}, rank %{{customdata}}<extra></extra>",
     ))
@@ -132,11 +134,17 @@ res = what_if(df, method, year, pct, None if scope == "All industries" else naic
 sel = res[res["naics"] == naics].iloc[0]
 
 m1, m2 = st.columns(2)
+d_score = sel["score_after"] - sel["score_before"]
+d_rank = int(sel["rank_change"])
+# Streamlit draws an up-arrow for any non-negative delta, so show no delta when nothing moved.
 m1.metric(f"{industry}: score", f"{sel['score_after']:.3f}",
-          f"{sel['score_after'] - sel['score_before']:+.3f}", delta_color="inverse")
+          f"{d_score:+.3f}" if abs(d_score) >= 0.0005 else None, delta_color="inverse")
 m2.metric(f"{industry}: rank", f"{sel['rank_after']} of {len(INDUSTRIES)}",
-          f"{int(sel['rank_change']):+d} places" if sel["rank_change"] else "no change",
-          delta_color="inverse")
+          f"{'up' if d_rank > 0 else 'down'} {abs(d_rank)} place{'s' if abs(d_rank) > 1 else ''}"
+          if d_rank else None,
+          delta_color="inverse" if d_rank > 0 else "normal")
+if not d_rank:
+    m2.caption("No change in rank")
 
 show = res[["industry", "score_before", "score_after", "rank_before", "rank_after"]].copy()
 show.columns = ["Industry", "Score before", "Score after", "Rank before", "Rank after"]
