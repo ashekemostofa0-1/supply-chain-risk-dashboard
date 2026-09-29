@@ -14,6 +14,7 @@ if a source is down, so the demo keeps working.
 
 import io
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -52,7 +53,7 @@ def nws_alerts(states=("TX", "LA")) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- DAILY
 @st.cache_data(ttl=6 * 3600, show_spinner=False)     # refresh every 6 hours
-def fred_daily(series_id: str) -> pd.DataFrame:
+def _fred_daily(series_id: str) -> pd.DataFrame:
     """Daily series from FRED without an API key.
     DCOILWTICO = WTI crude ($/bbl), DHHNGSP = Henry Hub natural gas ($/MMBtu)."""
     try:
@@ -65,9 +66,19 @@ def fred_daily(series_id: str) -> pd.DataFrame:
         df.columns = ["date", "value"]
         df["date"] = pd.to_datetime(df["date"])
         df["value"] = pd.to_numeric(df["value"], errors="coerce")
-        return df.dropna().tail(400)
+        df = df.dropna().tail(400)
+        if df.empty:
+            raise ValueError("empty")
+        return df
     except Exception as e:
         LAST_ERRORS[f"FRED {series_id}"] = repr(e)[:200]
+        raise   # failures are NOT cached, so the next page load tries again
+
+
+def fred_daily(series_id: str) -> pd.DataFrame:
+    try:
+        return _fred_daily(series_id)
+    except Exception:
         return pd.DataFrame(columns=["date", "value"])
 
 
@@ -75,7 +86,7 @@ PORTWATCH = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/ArcGIS/rest/services"
 
 
 @st.cache_data(ttl=12 * 3600, show_spinner=False)    # refresh twice a day
-def portwatch_daily(service: str, name_like: str, n: int = 200) -> pd.DataFrame:
+def _portwatch_daily(service: str, name_like: str, n: int = 200) -> pd.DataFrame:
     """Daily port calls (Daily_Ports_Data) or chokepoint transits
     (Daily_Chokepoints_Data) from IMF PortWatch."""
     try:
@@ -87,13 +98,21 @@ def portwatch_daily(service: str, name_like: str, n: int = 200) -> pd.DataFrame:
         r.raise_for_status()
         df = pd.DataFrame([f["attributes"] for f in r.json().get("features", [])])
         if df.empty:
-            return df
+            raise ValueError("no rows")
         # PortWatch dates may come as text or as milliseconds since 1970
         if pd.api.types.is_numeric_dtype(df["date"]):
             df["date"] = pd.to_datetime(df["date"], unit="ms")
         else:
             df["date"] = pd.to_datetime(df["date"])
         return df.sort_values("date")
+    except Exception as e:
+        LAST_ERRORS[f"PortWatch {name_like}"] = repr(e)[:200]
+        raise
+
+
+def portwatch_daily(service: str, name_like: str, n: int = 200) -> pd.DataFrame:
+    try:
+        return _portwatch_daily(service, name_like, n)
     except Exception:
         return pd.DataFrame()
 
@@ -107,6 +126,27 @@ def tanker_column(df: pd.DataFrame):
 
 # ---------------------------------------------------------------- WEEKLY
 @st.cache_data(ttl=24 * 3600, show_spinner=False)    # refresh once a day
+def _eia_series(series_id: str, keep: int, key: str) -> pd.DataFrame:
+    """Any EIA series. Default: Gulf Coast (PADD 3) weekly refinery utilization, %.
+    Daily prices: PET.RWTC.D = WTI crude spot, NG.RNGWHHD.D = Henry Hub gas spot.
+    Needs a free key from eia.gov/opendata saved as EIA_KEY in Streamlit secrets."""
+    try:
+        r = requests.get(f"https://api.eia.gov/v2/seriesid/{series_id}",
+                         params={"api_key": key}, timeout=30)
+        r.raise_for_status()
+        data = r.json()["response"]["data"]
+        df = pd.DataFrame(data)[["period", "value"]].rename(columns={"period": "date"})
+        df["date"] = pd.to_datetime(df["date"])
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        df = df.dropna().sort_values("date").tail(keep)
+        if df.empty:
+            raise ValueError("empty")
+        return df
+    except Exception as e:
+        LAST_ERRORS[f"EIA {series_id}"] = repr(e)[:200]
+        raise
+
+
 def eia_series(series_id: str = "PET.W_NA_YUP_R30_PER.W", keep: int = 400) -> pd.DataFrame:
     """Any EIA series. Default: Gulf Coast (PADD 3) weekly refinery utilization, %.
     Daily prices: PET.RWTC.D = WTI crude spot, NG.RNGWHHD.D = Henry Hub gas spot.
@@ -116,18 +156,11 @@ def eia_series(series_id: str = "PET.W_NA_YUP_R30_PER.W", keep: int = 400) -> pd
     except Exception:          # no secrets file yet
         key = None
     if not key:
+        LAST_ERRORS["EIA"] = "EIA_KEY missing from secrets"
         return pd.DataFrame(columns=["date", "value"])
     try:
-        r = requests.get(f"https://api.eia.gov/v2/seriesid/{series_id}",
-                         params={"api_key": key}, timeout=30)
-        r.raise_for_status()
-        data = r.json()["response"]["data"]
-        df = pd.DataFrame(data)[["period", "value"]].rename(columns={"period": "date"})
-        df["date"] = pd.to_datetime(df["date"])
-        df["value"] = pd.to_numeric(df["value"], errors="coerce")
-        return df.dropna().sort_values("date").tail(keep)
-    except Exception as e:
-        LAST_ERRORS[f"EIA {series_id}"] = repr(e)[:200]
+        return _eia_series(series_id, keep, key)
+    except Exception:
         return pd.DataFrame(columns=["date", "value"])
 
 
@@ -183,7 +216,7 @@ def live_signals() -> dict:
     sig["refinery"]["flag"] = sig["refinery"]["value"] is not None and sig["refinery"]["value"] < 85
     for k in ("port_arthur", "houston", "panama"):
         sig[k]["flag"] = sig[k]["value"] is not None and sig[k]["value"] <= -25
-    sig["checked_at"] = dt.datetime.now().strftime("%b %d, %Y %I:%M %p")
+    sig["checked_at"] = dt.datetime.now(ZoneInfo("America/Chicago")).strftime("%b %d, %Y %I:%M %p") + " (Texas time)"
     return sig
 
 
