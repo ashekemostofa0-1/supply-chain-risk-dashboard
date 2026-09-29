@@ -1,0 +1,7 @@
+naics,industry,mean_rank,best_rank,worst_rank,max_same_year_spread,share_top2,verdict
+3251,Basic chemicals,1.4444,1,3,1,0.9444,robust high risk
+3252,Resins and synthetic rubber,2.5,2,4,1,0.5556,stable middle
+3259,Other chemical products,3.3889,1,6,3,0.2778,method-dependent
+3253,Fertilizers and pesticides,3.4444,1,6,2,0.1667,stable middle
+3261,Plastics products,4.7222,3,6,3,0.0,method-dependent
+3241,Petroleum and coal products,5.5,1,6,4,0.0556,robust low risk

@@ -1,4 +1,5 @@
 """Step 10: validation test - which weighting method predicted real disruption best?
+Step 11: agreement test - do the three methods rank the industries the same way?
 
 Run from the project folder:
     python -m src.validate
@@ -24,6 +25,18 @@ Sensitivity check (reported separately, never replaces the main result)
     supply-chain exposure index is not designed to predict. The test is repeated without
     petroleum to show how much that one industry drives the result.
 
+Step 11 agreement test
+    For every year 2019-2024 the three methods each rank the six industries (1 = riskiest).
+      - Pairwise Spearman between methods (equal vs entropy, equal vs AHP, entropy vs AHP)
+      - Kendall's W across all three methods: 1 = identical rankings, 0 = no agreement
+          W = 12 * S / (m^2 * (n^3 - n)),  m = 3 methods, n = 6 industries,
+          S = sum of squared deviations of each industry's rank-sum from the mean rank-sum
+      - Per industry, over all 18 method-year rankings:
+          "robust high risk"  ranked 1-2 in at least 80% of them
+          "robust low risk"   ranked 5-6 in at least 80% of them
+          "method-dependent"  in the same year, the methods disagree by 3+ places at least once
+          "stable middle"     everything else
+
 Caution for the report
     With only six industries, a correlation needs to be about 0.89 or higher to be
     statistically significant at the 5% level, so p-values are printed but the result
@@ -43,6 +56,8 @@ METHODS = ["equal", "entropy", "ahp"]
 BASE_YEAR, SHOCK_YEAR = 2019, 2020
 OUT_FILE = os.path.join(CLEAN_DIR, "validation.csv")
 OUT_SUMMARY = os.path.join(CLEAN_DIR, "validation_summary.csv")
+OUT_AGREE_YEAR = os.path.join(CLEAN_DIR, "agreement_by_year.csv")
+OUT_AGREE_IND = os.path.join(CLEAN_DIR, "agreement_by_industry.csv")
 
 
 def output_drops():
@@ -85,6 +100,52 @@ def validate():
     return table, summary
 
 
+# ----------------------------- Step 11: agreement -----------------------------
+
+def kendalls_w(rank_matrix):
+    """Kendall's coefficient of concordance. rank_matrix: rows = items, columns = raters."""
+    R = rank_matrix.sum(axis=1)
+    n, m = rank_matrix.shape
+    S = ((R - R.mean()) ** 2).sum()
+    return 12 * S / (m ** 2 * (n ** 3 - n))
+
+
+def agreement():
+    """Return (per-year agreement table, per-industry robustness table)."""
+    _, _, _, scores = build_scores(load_indicators())
+    rank_cols = [f"rank_{m}" for m in METHODS]
+    pairs = [("equal", "entropy"), ("equal", "ahp"), ("entropy", "ahp")]
+
+    by_year = []
+    for year, g in scores.groupby("year"):
+        row = {"year": year, "kendall_w": kendalls_w(g[rank_cols].to_numpy())}
+        for a, b in pairs:
+            row[f"rho_{a}_{b}"] = spearmanr(g[f"score_{a}"], g[f"score_{b}"])[0]
+        by_year.append(row)
+    by_year = pd.DataFrame(by_year)
+
+    by_ind = []
+    for naics, g in scores.groupby("naics"):
+        ranks = g[rank_cols].to_numpy().ravel()
+        spread = (g[rank_cols].max(axis=1) - g[rank_cols].min(axis=1)).max()
+        share_top = (ranks <= 2).mean()
+        share_bottom = (ranks >= 5).mean()
+        if share_top >= 0.8:
+            verdict = "robust high risk"
+        elif share_bottom >= 0.8:
+            verdict = "robust low risk"
+        elif spread >= 3:
+            verdict = "method-dependent"
+        else:
+            verdict = "stable middle"
+        by_ind.append(dict(naics=naics, industry=g["industry"].iloc[0],
+                           mean_rank=ranks.mean(), best_rank=int(ranks.min()),
+                           worst_rank=int(ranks.max()), max_same_year_spread=int(spread),
+                           share_top2=share_top, verdict=verdict))
+    by_ind = pd.DataFrame(by_ind).sort_values("mean_rank")
+    return by_year, by_ind
+
+
 def main():
     table, summary = validate()
     os.makedirs(CLEAN_DIR, exist_ok=True)
@@ -105,6 +166,16 @@ def main():
           f"(rho = {best['spearman_annual']:.3f}, annual-average drop).")
     print("Note: with 6 industries, |rho| must be about 0.89+ to be significant at 5%.")
     print(f"Saved {OUT_FILE} and {OUT_SUMMARY}")
+
+    by_year, by_ind = agreement()
+    by_year.round(4).to_csv(OUT_AGREE_YEAR, index=False)
+    by_ind.round(4).to_csv(OUT_AGREE_IND, index=False)
+    print("\n=== Step 11: agreement between the three methods ===")
+    print("Per year (Kendall's W: 1 = all three rank identically; rho = pairwise Spearman):")
+    print(by_year.round(3).to_string(index=False))
+    print("\nPer industry, across all 18 method-year rankings (rank 1 = riskiest):")
+    print(by_ind.round(2).to_string(index=False))
+    print(f"Saved {OUT_AGREE_YEAR} and {OUT_AGREE_IND}")
 
 
 if __name__ == "__main__":
