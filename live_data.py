@@ -191,9 +191,9 @@ def live_signals() -> dict:
     alerts = nws_alerts()
     wti, gas = daily_price("wti"), daily_price("gas")
     refin = eia_weekly()
-    pa = portwatch_daily("Daily_Ports_Data", "Port Arthur")
-    hou = portwatch_daily("Daily_Ports_Data", "Houston")
-    pan = portwatch_daily("Daily_Chokepoints_Data", "Panama")
+    pa = portwatch_daily("Daily_Ports_Data", "Port Arthur", n=400)
+    hou = portwatch_daily("Daily_Ports_Data", "Houston", n=400)
+    pan = portwatch_daily("Daily_Chokepoints_Data", "Panama", n=400)
 
     def port_signal(df):
         col = tanker_column(df) if not df.empty else None
@@ -216,6 +216,25 @@ def live_signals() -> dict:
     sig["refinery"]["flag"] = sig["refinery"]["value"] is not None and sig["refinery"]["value"] < 85
     for k in ("port_arthur", "houston", "panama"):
         sig[k]["flag"] = sig[k]["value"] is not None and sig[k]["value"] <= -25
+    # Last 12 months of each series, for the trend charts
+    def last_year(df, col="value"):
+        if df is None or df.empty or col not in df:
+            return pd.DataFrame(columns=["date", "value"])
+        out = df[["date", col]].rename(columns={col: "value"})
+        return out[out["date"] >= out["date"].max() - pd.Timedelta(days=365)]
+
+    def port_7d(df):
+        col = tanker_column(df) if not df.empty else None
+        if not col:
+            return pd.DataFrame(columns=["date", "value"])
+        d = df[["date", col]].copy()
+        d["value"] = d[col].rolling(7, min_periods=7).mean()
+        return last_year(d.dropna(subset=["value"]))
+
+    sig["series"] = {
+        "wti": last_year(wti), "gas": last_year(gas), "refinery": last_year(refin),
+        "port_arthur": port_7d(pa), "panama": port_7d(pan),
+    }
     sig["checked_at"] = dt.datetime.now(ZoneInfo("America/Chicago")).strftime("%b %d, %Y %I:%M %p") + " (Texas time)"
     return sig
 

@@ -57,7 +57,9 @@ with left:
     hero("Supply Chain Risk Dashboard",
          "Structural supply-chain risk for U.S. oil and gas related manufacturing, "
          "combined with live signals from weather alerts, energy prices, refineries and ports.",
-         badges=[f"{len(INDUSTRIES)} industries", "4-digit NAICS", f"{min(YEARS)} to {max(YEARS)}",
+         badges=[f"{len(INDUSTRIES)} industries", "4-digit NAICS",
+                 f"Structural data {min(YEARS)} to {max(YEARS)}",
+                 f"Live data to {pd.Timestamp.now(tz='America/Chicago'):%b %d, %Y}",
                  f"Method: {method_name}"])
 with right:
     render_globe(height=460)

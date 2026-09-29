@@ -6,6 +6,7 @@ Usage in app.py (after you know the selected industry and its risk score):
     render_live_panel(industry_name, risk_score)
 """
 
+import plotly.graph_objects as go
 import streamlit as st
 from live_data import live_signals, alert_level
 
@@ -63,6 +64,8 @@ def _panel(industry_name: str, structural_score: float):
     c7.metric("Panama Canal tanker transits, 7d vs 90d", _fmt(sig["panama"]["value"]),
               "flag" if sig["panama"]["flag"] else "normal", delta_color="off")
 
+    _trends(sig["series"])
+
     st.markdown("**Recommended actions**")
     for a in ACTIONS[level]:
         st.markdown(f"- {a}")
@@ -74,6 +77,52 @@ def _panel(industry_name: str, structural_score: float):
     st.caption("Sources: National Weather Service (real time), EIA (daily prices, weekly "
                "refinery use), IMF PortWatch (daily port calls, 2 to 4 days behind). Thresholds are simple "
                "rules tested on past events; they are not forecasts.")
+
+
+LINE = "#38bdf8"      # one hue for every trend chart (single series each)
+GUIDE = "#94a3b8"     # recessive grey for alert lines
+
+
+def _trend_chart(df, title, unit, fmt, alert=None, alert_text=""):
+    if df.empty:
+        st.caption(f"{title}: no data right now")
+        return
+    last = df.iloc[-1]
+    fig = go.Figure(go.Scatter(
+        x=df["date"], y=df["value"], mode="lines", line=dict(color=LINE, width=2),
+        hovertemplate=f"%{{x|%b %d, %Y}}<br><b>%{{y:{fmt}}}</b> {unit}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=[last["date"]], y=[last["value"]], mode="markers",
+                             marker=dict(color=LINE, size=8), hoverinfo="skip"))
+    if alert is not None:
+        fig.add_hline(y=alert, line_dash="dot", line_color=GUIDE, line_width=1,
+                      annotation_text=alert_text, annotation_position="bottom left",
+                      annotation_font_color=GUIDE)
+    fig.update_layout(
+        title=dict(text=f"{title}  <span style='font-size:12px;color:{GUIDE}'>latest "
+                        f"{last['date']:%b %d}: {last['value']:{fmt}} {unit}</span>", font=dict(size=14)),
+        height=230, margin=dict(l=10, r=10, t=40, b=10), showlegend=False,
+        hovermode="x unified", xaxis=dict(showgrid=False),
+        yaxis=dict(gridcolor="rgba(148,163,184,0.15)", zeroline=False))
+    st.plotly_chart(fig, width="stretch")
+
+
+def _trends(series):
+    st.markdown("**Last 12 months, up to the latest available day**")
+    a, b = st.columns(2)
+    with a:
+        _trend_chart(series["wti"], "WTI crude", "$/bbl", ".2f")
+    with b:
+        _trend_chart(series["gas"], "Henry Hub natural gas", "$/MMBtu", ".2f")
+    c, d = st.columns(2)
+    with c:
+        _trend_chart(series["refinery"], "Gulf Coast refinery use", "%", ".1f",
+                     alert=85, alert_text="alert below 85%")
+    with d:
+        _trend_chart(series["port_arthur"], "Port Arthur tanker calls, 7-day average",
+                     "calls/day", ".1f")
+    st.caption("Structural scores use annual data (latest year 2024, the newest the Census "
+               "has published). The live signals and these charts run up to the latest day "
+               "each source has released.")
 
 
 def render_live_panel(industry_name: str, structural_score: float):
