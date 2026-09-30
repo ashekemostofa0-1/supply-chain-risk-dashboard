@@ -287,9 +287,12 @@ def live_signals() -> dict:
     # Weather: only supply-relevant events that the NWS rates Severe or Extreme
     if not alerts.empty:
         alerts = alerts.copy()
-        alerts["supply_relevant"] = alerts["event"].fillna("").str.lower().apply(
-            lambda e: any(w in e for w in SUPPLY_WEATHER))
-        severe = alerts[alerts["supply_relevant"] & alerts["severity"].isin(["Severe", "Extreme"])]
+        alerts["supply_relevant"] = [any(w in str(e).lower() for w in SUPPLY_WEATHER)
+                                     for e in alerts["event"].tolist()]
+        alerts["supply_relevant"] = alerts["supply_relevant"].astype(bool)
+        is_sev = pd.Series([str(v) in ("Severe", "Extreme") for v in alerts["severity"].tolist()],
+                           index=alerts.index, dtype=bool)
+        severe = alerts[alerts["supply_relevant"] & is_sev]
     else:
         severe = alerts
     sig = {

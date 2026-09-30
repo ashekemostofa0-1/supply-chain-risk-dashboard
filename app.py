@@ -141,7 +141,7 @@ top_bar(n_alerts, sig["checked_at"])
 # ------------------------------- ① filter bar -------------------------------
 st.markdown('<div id="filters" class="anchor"></div>', unsafe_allow_html=True)
 with st.container(border=True):
-    c = st.columns([2.2, 1.9, 1.5, 1.6, 1.3, 0.6], vertical_alignment="bottom")
+    c = st.columns([2.1, 1.8, 1.45, 1.5, 1.25, 0.65, 0.6], vertical_alignment="bottom")
     c[0].selectbox("① Product / HS code", list(LABEL_TO_PRODUCT), key="f_product", on_change=on_product,
                    help="Click and type to search, for example 3901 or polyethylene.")
     c[1].text_input("Or search product / HS code", key="f_search", on_change=on_search,
@@ -149,7 +149,9 @@ with st.container(border=True):
     c[2].selectbox("② Supplier country", product["origins"], key="f_supplier")
     c[3].selectbox("Destination port", list(DESTS), key="f_dest")
     c[4].selectbox("Time horizon", list(HORIZONS), key="f_horizon")
-    c[5].button("Reset", on_click=reset_filters, width="stretch")
+    c[5].button("Apply", type="primary", on_click=on_search, width="stretch",
+                help="Choices update instantly; Apply also runs the search box.")
+    c[6].button("Reset", on_click=reset_filters, width="stretch")
 
 lane_names = [f"Route {r.key}: {r.name}" for r in routes_df.itertuples()]
 product_strip(product, sig, [f"{origin} ({ORIGINS[origin]['port']}) → {dest}"] + lane_names[:2])

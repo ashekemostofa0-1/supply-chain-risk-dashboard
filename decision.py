@@ -27,6 +27,7 @@ BENCH_NAME = {"brent": "Brent crude", "wti": "WTI crude", "gas": "Henry Hub gas"
 
 
 def level_of(score):
+    score = round(score)          # match the rounded number shown on screen
     return "HIGH" if score >= 70 else "ELEVATED" if score >= 45 else "NORMAL"
 
 
@@ -96,9 +97,10 @@ def risk_components(sig, product, origin, dest, option, structural, as_of=None):
         d["eff"] = pd.to_datetime(d.get("effective"), errors="coerce", utc=True).dt.tz_convert(None) \
             if "effective" in d else pd.NaT
         d = d[d["eff"].isna() | (d["eff"] <= as_of)] if as_of < now else d
-        rel = d["event"].fillna("").str.lower().apply(lambda e: any(x in e for x in SUPPLY_WEATHER))
-        sev = d["severity"].isin(["Severe", "Extreme"])
-        if (rel & sev).any():
+        ev = [str(e).lower() for e in d["event"].tolist()]
+        rel = pd.Series([any(x in e for x in SUPPLY_WEATHER) for e in ev], index=d.index, dtype=bool)
+        sev = pd.Series([str(v) in ("Severe", "Extreme") for v in d["severity"].tolist()], index=d.index, dtype=bool)
+        if len(d) and (rel & sev).any():
             w = 85.0
             notes["weather"] = ", ".join(sorted(set(d.loc[rel & sev, "event"])))[:60] + f" near {dest.split(',')[0]}"
         elif len(d):
