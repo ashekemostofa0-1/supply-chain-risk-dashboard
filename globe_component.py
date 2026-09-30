@@ -89,10 +89,11 @@ _TEMPLATE = r"""
 <div id="gwrap">
   <div id="globe"></div>
   <div class="overlay top">
-    <div class="title">How U.S. oil, gas &amp; chemicals move</div>
+    <div class="title">__TITLE__</div>
     <div class="legend">
       <span><i class="sw ship"></i>Tanker / LNG ship</span>
       <span><i class="sw rail"></i>Rail (crude &amp; chemicals)</span>
+      <span><i class="sw road"></i>Truck (road)</span>
       <span><i class="sw usa"></i>United States</span>
       <span style="color:#94a3b8">Hover a country to see its name</span>
     </div>
@@ -122,6 +123,7 @@ _TEMPLATE = r"""
   .sw { display:inline-block; width:18px; height:4px; border-radius:2px; }
   .sw.ship { background:#22d3ee; box-shadow:0 0 8px #22d3ee; }
   .sw.rail { background:#fbbf24; box-shadow:0 0 8px #fbbf24; }
+  .sw.road { background:#c084fc; box-shadow:0 0 8px #c084fc; }
   .sw.usa  { background:rgba(59,130,246,0.45); border:1.5px solid #fde68a; height:10px; width:14px; }
   button { pointer-events:auto; cursor:pointer; font:600 12px Inter, system-ui, sans-serif;
            color:#e5e7eb; background:rgba(17,27,46,0.85); border:1px solid rgba(148,163,184,0.35);
@@ -140,7 +142,10 @@ _TEMPLATE = r"""
   const LABELS = HUBS.map(h => ({ ...h, kind: "hub" })).concat(GEO);
   const H = __H__;
   const USA_IDS = new Set(["840", "630"]);  // United States, Puerto Rico
-  const COLORS = { ship: "#22d3ee", rail: "#fbbf24" };
+  const COLORS = { ship: "#22d3ee", sea: "#22d3ee", rail: "#fbbf24", road: "#c084fc" };
+  const BASE = { ship: "rgba(34,211,238,0.22)", sea: "rgba(34,211,238,0.22)", rail: "rgba(251,191,36,0.25)",
+                 road: "rgba(192,132,252,0.25)" };
+  const FOCUS = __FOCUS__;
 
   if (typeof Globe === "undefined") {
     document.getElementById("gerr").style.display = "block";
@@ -177,15 +182,13 @@ _TEMPLATE = r"""
     .pathPointLng(p => p[1])
     .pathPointAlt(0.016)
     .pathResolution(3)
-    .pathColor(r => r.layer === "base"
-        ? (r.mode === "ship" ? "rgba(34,211,238,0.22)" : "rgba(251,191,36,0.25)")
-        : COLORS[r.mode])
-    .pathStroke(r => r.layer === "base" ? 0.5 : (r.mode === "rail" ? 1.6 : 1.3))
-    .pathDashLength(r => r.layer === "base" ? 1 : (r.mode === "rail" ? 0.06 : 0.04))
-    .pathDashGap(r => r.layer === "base" ? 0 : (r.mode === "rail" ? 0.05 : 0.08))
+    .pathColor(r => r.layer === "base" ? BASE[r.mode] : COLORS[r.mode])
+    .pathStroke(r => r.layer === "base" ? (FOCUS ? 1.0 : 0.5) : (r.mode === "sea" || r.mode === "ship" ? 1.3 : 1.6))
+    .pathDashLength(r => r.layer === "base" ? 1 : (r.mode === "rail" ? 0.06 : r.mode === "road" ? 0.08 : 0.04))
+    .pathDashGap(r => r.layer === "base" ? 0 : (r.mode === "rail" ? 0.05 : r.mode === "road" ? 0.04 : 0.08))
     .pathDashInitialGap(() => Math.random())
-    .pathDashAnimateTime(r => r.layer === "base" ? 0 : (r.mode === "rail" ? 7000 : 14000))
-    .pathLabel(r => r.layer === "flow" ? `<b>${r.name}</b><br/>${r.mode === "ship" ? "Ship" : "Rail"}` : "")
+    .pathDashAnimateTime(r => r.layer === "base" ? 0 : (r.mode === "rail" ? 7000 : r.mode === "road" ? 5000 : 14000))
+    .pathLabel(r => r.layer === "flow" ? `<b>${r.name}</b><br/>${({ship:"Ship",sea:"Ship",rail:"Rail",road:"Truck"})[r.mode]}` : "")
 
     .labelsData(LABELS)
     .labelLat("lat").labelLng("lng").labelText("name")
@@ -228,9 +231,15 @@ _TEMPLATE = r"""
     .catch(() => {});
 
   // Start looking at the USA, then rotate slowly
-  globe.pointOfView({ lat: 34, lng: -96, altitude: 2.1 }, 0);
   const ctr = globe.controls();
-  ctr.autoRotate = true;
+  if (FOCUS) {
+    globe.pointOfView({ lat: FOCUS.lat, lng: FOCUS.lng, altitude: FOCUS.alt }, 0);
+    ctr.autoRotate = false;
+    document.getElementById("btnRotate").classList.remove("on");
+  } else {
+    globe.pointOfView({ lat: 34, lng: -96, altitude: 2.1 }, 0);
+    ctr.autoRotate = true;
+  }
   ctr.autoRotateSpeed = 0.55;
   ctr.enableZoom = false;
 
@@ -252,15 +261,19 @@ _TEMPLATE = r"""
 """
 
 
-def globe_html(height: int = 480) -> str:
-    """Return the globe as an HTML string (also useful for testing in a browser)."""
+def globe_html(height: int = 480, paths=None, hubs=None, focus=None,
+               title: str = "How U.S. oil, gas &amp; chemicals move") -> str:
+    """Return the globe as an HTML string. paths: [{name, mode, points:[[lat,lng],...]}]."""
     return (_TEMPLATE
-            .replace("__ROUTES__", json.dumps(ROUTES))
-            .replace("__HUBS__", json.dumps(HUBS))
+            .replace("__ROUTES__", json.dumps(paths if paths is not None else ROUTES))
+            .replace("__HUBS__", json.dumps(hubs if hubs is not None else HUBS))
             .replace("__GEO__", json.dumps(GEO_LABELS))
+            .replace("__FOCUS__", json.dumps(focus))
+            .replace("__TITLE__", title)
             .replace("__H__", str(int(height))))
 
 
-def render_globe(height: int = 480) -> None:
-    """Draw the rotating globe inside the Streamlit page."""
-    components.html(globe_html(height), height=height + 4, scrolling=False)
+def render_globe(height: int = 480, paths=None, hubs=None, focus=None, title=None) -> None:
+    """Draw the rotating globe inside the Streamlit page (optionally a filtered set of paths)."""
+    kw = {"title": title} if title else {}
+    components.html(globe_html(height, paths, hubs, focus, **kw), height=height + 4, scrolling=False)

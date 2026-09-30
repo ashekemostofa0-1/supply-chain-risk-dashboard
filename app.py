@@ -6,7 +6,6 @@ Run from the project folder:
 Needs data/clean/risk_indicators.csv (python -m src.build_dataset).
 Live data needs EIA_KEY in .streamlit/secrets.toml (or Streamlit Cloud secrets).
 """
-import html
 import os
 
 import pandas as pd
@@ -17,17 +16,21 @@ from src.config import INDUSTRIES, YEARS
 from src.dashboard import LABELS, METHODS, comparison, contributions, load, scored, what_if
 from globe_component import render_globe
 from live_data import CHOKEPOINTS, PORTS, alert_level, live_signals
-from live_panel import alert_cards, crude_chart, industry_alert, trend_chart
-from routes import route_map, route_table
+from live_panel import (alert_cards, crude_chart, industry_alert, product_strip, traffic_panel,
+                        trend_chart)
+from products import HORIZONS, REGIONS, product_label, products_for
+from network import NODES, all_edges, find_alternatives, fmt_days, focus_for, hubs
+from routes import SIGNAL_NAMES, filter_routes, is_exact, map_legend_html, route_map, route_table, route_table_html, signal_level
+from risk_map import render_risk_map
 from simulator import render_simulator
-from ui_style import STATUS, apply_style, brand_bar, pill, section
+from ui_style import STATUS, apply_style, card_title, left_rail, pill, section, top_bar
 
 # Colors: one fixed color per method (never re-assigned), neutral grey for context.
 METHOD_COLORS = {"Equal": "#2a78d6", "Entropy": "#eb6834", "AHP": "#1baf7a"}
 GREY = "#898781"
 CLEAN = "data/clean"
 
-st.set_page_config(page_title="Supply Chain Risk Dashboard", layout="wide")
+st.set_page_config(page_title="Supply Chain Risk Pro", layout="wide", initial_sidebar_state="collapsed")
 apply_style()
 
 
@@ -38,122 +41,193 @@ def data():
 
 df = data()
 
-# ------------------------------- sidebar -------------------------------
-st.sidebar.header("Controls")
-names = {f"{code} - {name}": code for code, name in INDUSTRIES.items()}
-picked = st.sidebar.selectbox("Industry", list(names), index=1)
-naics = names[picked]
-year = st.sidebar.slider("Year (structural data)", min_value=min(YEARS), max_value=max(YEARS),
-                         value=max(YEARS), step=1)
-method_name = st.sidebar.radio("Weighting method", list(METHODS), index=0, horizontal=True)
-method = METHODS[method_name]
-if st.sidebar.button("Refresh live data", width="stretch"):
-    st.cache_data.clear()
-    st.rerun()
-st.sidebar.caption(
-    f"Structural scores run from 0 (lowest exposure in the {min(YEARS)}-{max(YEARS)} panel) to 1 "
-    "(highest). Data: Census ASM / Economic Census / AIES, Census trade, FRED. "
-    "Live signals: National Weather Service, EIA, IMF PortWatch."
-)
+# ------------------------------- filter state -------------------------------
+PRODUCTS = products_for(INDUSTRIES)
+LABEL_TO_PRODUCT = {product_label(p): p for p in PRODUCTS}
+DEFAULTS = {"f_product": product_label(PRODUCTS[0]), "f_search": "", "f_origin": "All Regions",
+            "f_dest": "All Regions", "f_horizon": "Next 1–3 months"}
+for k, v in DEFAULTS.items():
+    st.session_state.setdefault(k, v)
+st.session_state.setdefault("method", list(METHODS)[0])
+st.session_state.setdefault("year", max(YEARS))
 
+
+def apply_search():
+    q = st.session_state["f_search"].strip().lower()
+    if q:
+        hit = next((lab for lab, p in LABEL_TO_PRODUCT.items()
+                    if q in lab.lower() or q in p["desc"].lower()), None)
+        if hit:
+            st.session_state["f_product"] = hit
+
+
+def reset_filters():
+    for k, v in DEFAULTS.items():
+        st.session_state[k] = v
+
+
+product = LABEL_TO_PRODUCT[st.session_state["f_product"]]
+naics = product["naics"]
 industry = INDUSTRIES[naics]
+method_name = st.session_state["method"]
+method = METHODS[method_name]
+year = st.session_state["year"]
 table, weights = scored(df, method)
 row = table[(table["naics"] == naics) & (table["year"] == year)].iloc[0]
 
 # ------------------------------- live data + alert level -------------------------------
 with st.spinner("Checking live sources..."):
     sig = live_signals()
-# The live alert uses the most recent structural score, not the year on the slider.
 latest = table[(table["naics"] == naics) & (table["year"] == max(YEARS))]
 latest_score = float(latest["score"].iloc[0]) if not latest.empty else float(row["score"])
 level, n_flags = alert_level(latest_score, sig)
-routes_df = route_table(sig)
+o_sel, d_sel = st.session_state["f_origin"], st.session_state["f_dest"]
+routes = filter_routes(o_sel, d_sel)
+map_filtered = (o_sel, d_sel) != ("All Regions", "All Regions")
+if not map_filtered:
+    map_note = f"All routes · {len(routes)} lanes"
+elif is_exact(o_sel, d_sel):
+    map_note = f"{o_sel} ↔ {d_sel} · {len(routes)} route{'s' if len(routes) != 1 else ''}"
+else:
+    map_note = f"No direct lane {o_sel} ↔ {d_sel} · showing routes touching either region"
+routes_df = route_table(sig, routes)
+n_alerts = int(sig["weather"]["flag"]) + sum(
+    1 for k in list(PORTS) + list(CHOKEPOINTS) if sig.get(k, {}).get("flag")) + int(
+    sig["wti"]["flag"] or sig["gas"]["flag"] or sig["refinery"]["flag"])
 
-brand_bar(
-    "Supply Chain Risk Dashboard",
-    "Oil, gas & chemical supply risk for U.S. Gulf Coast manufacturing",
-    pill(level, f"{industry}: {STATUS[level]['label']}")
-    + f'<span class="meta">Live data checked {html.escape(sig["checked_at"])}<br>'
-      f'Structural data {min(YEARS)}–{max(YEARS)} · Method: {html.escape(method_name)}</span>')
-st.write("")
+left_rail(n_alerts)
+top_bar(n_alerts, sig["checked_at"])
 
-tab_over, tab_ind, tab_prices, tab_ship, tab_sim = st.tabs(
-    ["Overview", "Industry Risk", "Prices & Trends", "Shipping & Routes", "Procurement Simulator"])
+# ------------------------------- filter bar -------------------------------
+st.markdown('<div id="filters" class="anchor"></div>', unsafe_allow_html=True)
+with st.form("filters_form", border=False):
+    c = st.columns([2.1, 2.1, 1.35, 1.35, 1.45, 0.75, 0.55], vertical_alignment="bottom")
+    c[0].selectbox("HS Code or Product Code", list(LABEL_TO_PRODUCT), key="f_product",
+                 help="Click and type to search, for example 2709 or crude.")
+    c[1].text_input("Or search by product name", key="f_search", placeholder="Search product or HS code...")
+    c[2].selectbox("Origin", REGIONS, key="f_origin")
+    c[3].selectbox("Destination", REGIONS, key="f_dest")
+    c[4].selectbox("Time Horizon", list(HORIZONS), key="f_horizon")
+    c[5].form_submit_button("Apply", type="primary", width="stretch", on_click=apply_search)
+    c[6].form_submit_button("Reset", width="stretch", on_click=reset_filters)
 
-# ================================ OVERVIEW ================================
-with tab_over:
-    alert_cards(sig)
-    if not sig["weather"]["detail"].empty:
-        with st.expander("Active weather alerts (National Weather Service)"):
-            show_w = sig["weather"]["detail"].copy()
-            show_w["supply_relevant"] = show_w["supply_relevant"].map({True: "yes", False: "no"})
-            st.dataframe(show_w, width="stretch", hide_index=True)
-    st.write("")
-    m, t = st.columns([1.55, 1], gap="large")
-    with m, st.container(border=True):
-        section("Global route risk map",
-                "Main tanker lanes for U.S. Gulf Coast oil and chemicals. Colors come from live signals.")
-        st.plotly_chart(route_map(sig, routes_df), width="stretch", config={"displayModeBar": False})
-        st.caption("Routes are illustrative major lanes, not scaled to volume.")
-    with t, st.container(border=True):
-        section("Your industry right now")
-        industry_alert(industry, latest_score, sig, level)
-    with st.container(border=True):
-        section("Route risk and transit time",
-                "Risk = number of warning signals on the route: 0 Normal, 1 Elevated, 2+ High.")
-        show = routes_df.copy()
-        show["Risk"] = show["Risk"].map(lambda l: f"{STATUS[l]['icon']} {STATUS[l]['label']}")
-        st.dataframe(show, width="stretch", hide_index=True)
-        st.caption("Voyage times are approximate for a tanker at about 12-13 knots, without port delays. "
-                   "Traffic data: IMF PortWatch (2 to 4 days behind).")
+product_strip(product, sig, [r["name"] for r in routes])
+alert_cards(sig)
 
-# ================================ PRICES ================================
-with tab_prices:
-    with st.container(border=True):
-        section("Crude oil benchmarks", "Daily spot prices from the EIA.")
-        rng = {"1M": 31, "3M": 92, "6M": 183, "1Y": 366}
-        if hasattr(st, "segmented_control"):
-            pick = st.segmented_control("Range", list(rng), default="3M", key="price_range") or "3M"
-        else:
-            pick = st.radio("Range", list(rng), index=1, horizontal=True, key="price_range")
-        crude_chart(sig["series"], rng[pick])
-    a, b = st.columns(2)
-    with a, st.container(border=True):
-        trend_chart(sig["series"]["gas"], "Henry Hub natural gas", "$/MMBtu", ".2f")
-    with b, st.container(border=True):
-        trend_chart(sig["series"]["refinery"], "Gulf Coast refinery use", "%", ".1f",
-                    alert=85, alert_text="alert below 85%")
-    st.caption("Structural scores use annual data (latest year 2024, the newest the Census has published). "
-               "Live signals and these charts run up to the latest day each source has released.")
+# ------------------------------- map | traffic | routes -------------------------------
+m, t, r = st.columns([1.3, 0.95, 1.1], gap="small")
+with m:
+    render_risk_map(sig, routes, routes_df, height=400, focus=map_filtered, note=map_note)
+with t, st.container(border=True):
+    card_title("Tanker Traffic")
+    traffic_panel(sig)
+with r, st.container(border=True):
+    card_title("Route Risk &amp; Transit Time")
+    st.markdown(route_table_html(routes_df), unsafe_allow_html=True)
+    st.caption("Risk = warning signals on the route (0 Low, 1 Medium, 2+ High). Trend = tanker traffic at "
+               "the route's weakest point. Transit times are typical, without port delays.")
 
-# ================================ SHIPPING ================================
-with tab_ship:
-    g, info = st.columns([1.3, 1], gap="large")
-    with g:
-        render_globe(height=500)
-    with info, st.container(border=True):
-        section("Tanker traffic at key points", "7-day average vs the previous 90 days (IMF PortWatch).")
-        places = {**PORTS, **CHOKEPOINTS}
-        rows = [{"Place": v["label"],
-                 "Change": f"{sig[k]['value']:+.0f}%" if sig[k]["value"] is not None else "no data",
-                 "Status": f"{STATUS[s]['icon']} {STATUS[s]['label']}",
-                 "Data through": f"{sig[k]['date']:%b %d}" if sig[k]["date"] is not None else ""}
-                for k, v in places.items()
-                for s in [("HIGH" if sig[k].get("flag") else "NODATA" if sig[k]["value"] is None
-                           else "MONITOR" if sig[k]["value"] <= -10 else "NORMAL")]]
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-    cols = st.columns(3)
-    for i, (k, v) in enumerate({**PORTS, **CHOKEPOINTS}.items()):
-        with cols[i % 3], st.container(border=True):
-            trend_chart(sig["series"].get(k), f"{v['label']}, tanker calls or transits (7-day avg)",
-                        "per day", ".1f", height=210)
+# ------------------------------- simulator -------------------------------
+st.markdown('<div id="simulator" class="anchor"></div>', unsafe_allow_html=True)
+with st.container(border=True):
+    render_simulator(sig, level, HORIZONS[st.session_state["f_horizon"]])
 
-# ================================ SIMULATOR ================================
-with tab_sim:
-    render_simulator(sig, level)
+# ------------------------------- trade & prices -------------------------------
+section("prices", "Trade &amp; Prices", "Daily EIA spot prices and weekly Gulf Coast refinery use, "
+        "up to the latest day each source has released.")
+with st.container(border=True):
+    rng = {"1M": 31, "3M": 92, "6M": 183, "1Y": 366}
+    pick = (st.segmented_control("Range", list(rng), default="3M", key="price_range")
+            if hasattr(st, "segmented_control") else
+            st.radio("Range", list(rng), index=1, horizontal=True, key="price_range")) or "3M"
+    card_title("Crude Oil Benchmarks (WTI and Brent)")
+    crude_chart(sig["series"], rng[pick])
+a, b = st.columns(2)
+with a, st.container(border=True):
+    trend_chart(sig["series"]["gas"], "Henry Hub natural gas", "$/MMBtu", ".2f")
+with b, st.container(border=True):
+    trend_chart(sig["series"]["refinery"], "Gulf Coast refinery use", "%", ".1f",
+                alert=85, alert_text="alert below 85%")
 
-# ================================ INDUSTRY RISK ================================
-with tab_ind:
+# ------------------------------- shipping & routes -------------------------------
+section("shipping", "Shipping &amp; Routes", "All U.S. oil, gas and chemical corridors by ship, rail and "
+        "truck. Pick a start and end point to see every alternative between them.")
+ALL = "All U.S. routes"
+hub_names = {v["name"]: k for k, v in NODES.items()}
+f1, f2, f3 = st.columns([1.3, 1.3, 2.4], vertical_alignment="bottom")
+g_from = f1.selectbox("From", [ALL] + list(hub_names), key="g_from")
+g_to = f2.selectbox("To", [ALL] + list(hub_names), key="g_to")
+alts = []
+if g_from != ALL and g_to != ALL and g_from != g_to:
+    alts = find_alternatives(hub_names[g_from], hub_names[g_to])
+if alts:
+    paths = [{"name": f"Option {n}: {a['label']} ({fmt_days(*a['days'])})", "mode": leg["mode"],
+              "points": leg["points"]} for n, a in enumerate(alts, 1) for leg in a["legs"]]
+    stops = sorted({s_ for a in alts for s_ in a["stops"]})
+    globe_kw = dict(paths=paths, hubs=hubs(stops), focus=focus_for([p for x in paths for p in x["points"]]),
+                    title=f"{g_from.split(' (')[0]} → {g_to.split(' (')[0]}: {len(alts)} route option(s)")
+    f3.caption(f"Showing {len(alts)} alternative(s). Times are typical planning ranges, not quotes.")
+else:
+    globe_kw = dict(paths=all_edges(), hubs=hubs(), title="How U.S. oil, gas &amp; chemicals move")
+    if g_from != ALL and g_to != ALL:
+        f3.caption("No route found between these two points in the network." if g_from != g_to
+                   else "Pick two different points.")
+g, info = st.columns([1.3, 1], gap="small")
+with g:
+    render_globe(height=470, **globe_kw)
+with info, st.container(border=True):
+    if alts:
+        card_title("Route alternatives", f"{g_from} → {g_to}")
+        order = {"NODATA": 0, "NORMAL": 1, "MONITOR": 2, "ELEVATED": 3, "HIGH": 4}
+        rows = ""
+        for n, a in enumerate(alts, 1):
+            lv = [signal_level(sig, k) for k in a["signals"]]
+            worst = max(lv, key=lambda l: order[l]) if lv else "NORMAL"
+            flagged = [SIGNAL_NAMES.get(k, k) for k in a["signals"] if signal_level(sig, k) == "HIGH"]
+            risk_txt = {"HIGH": "High", "ELEVATED": "Medium", "MONITOR": "Monitor"}.get(worst, "Low")
+            rows += (f"<tr><td><b>{n}</b></td><td>{a['label']}<br><span style='color:#64748B;font-size:12px'>"
+                     f"{a['via']}</span></td><td class=num>{fmt_days(*a['days'])}</td>"
+                     f"<td>{pill(worst, risk_txt)}"
+                     + (f"<br><span style='color:#64748B;font-size:11.5px'>{', '.join(flagged)}</span>" if flagged else "")
+                     + "</td></tr>")
+        st.markdown('<div class="tbl-wrap"><table class="rt"><tr><th>#</th><th>Route</th>'
+                    f'<th class=num>Transit (approx.)</th><th>Live risk</th></tr>{rows}</table></div>',
+                    unsafe_allow_html=True)
+        st.caption("Risk comes from live signals on each route (Gulf Coast weather, port and chokepoint "
+                   "tanker traffic). Road and rail legs have no live feed yet.")
+    else:
+        card_title("Tanker traffic at key points", "7-day average vs the previous 90 days")
+        rows = "".join(
+            f"<tr><td>{v['label']}</td><td class=num>"
+            f"{(format(sig[k]['value'], '+.0f') + '%') if sig[k]['value'] is not None else 'no data'}</td>"
+            f"<td>{pill(signal_level(sig, k), STATUS[signal_level(sig, k)]['label'] if signal_level(sig, k) != 'NORMAL' else 'Normal')}</td>"
+            f"<td>{format(sig[k]['date'], '%b %d') if sig[k]['date'] is not None else ''}</td></tr>"
+            for k, v in {**PORTS, **CHOKEPOINTS}.items())
+        st.markdown('<div class="tbl-wrap"><table class="rt"><tr><th>Place</th><th class=num>Change</th>'
+                    f'<th>Status</th><th>Data through</th></tr>{rows}</table></div>', unsafe_allow_html=True)
+
+# ------------------------------- risk & alerts -------------------------------
+section("alerts", "Risk &amp; Alerts", "What changed, why it matters for your industry, and what to do.")
+x, y = st.columns([1, 1.25], gap="small")
+with x, st.container(border=True):
+    industry_alert(industry, latest_score, sig, level)
+with y, st.container(border=True):
+    card_title("Active weather alerts (National Weather Service)",
+               "Gulf Coast refinery and port counties in Texas and Louisiana")
+    if sig["weather"]["detail"].empty:
+        st.caption("No active alerts right now.")
+    else:
+        w = sig["weather"]["detail"].copy()
+        if "supply_relevant" in w:
+            w["supply_relevant"] = w["supply_relevant"].map({True: "yes", False: "no"})
+        st.dataframe(w, width="stretch", hide_index=True, height=260)
+
+with st.container(border=True):
+    card_title(f"Structural risk: {industry}",
+               f"Annual data {min(YEARS)}–{max(YEARS)} (the newest year the Census has published).")
+    k1, k2 = st.columns([1, 2])
+    k1.radio("Weighting method", list(METHODS), horizontal=True, key="method")
+    k2.slider("Year (structural data)", min_value=min(YEARS), max_value=max(YEARS), step=1, key="year")
     # ------------------------------- panel 1 -------------------------------
     st.subheader(f"1. Risk score: {industry}, {year}")
     c1, c2, c3 = st.columns(3)
@@ -257,17 +331,20 @@ with tab_ind:
     st.caption(f"Import dependence is multiplied by (1 + {pct}/100), capped at 100%, in {year}; "
                "all scores are then recalculated. Under Entropy the weights are also recalculated.")
 
-    # ------------------------------- model checks -------------------------------
-    with st.expander("Model checks (Steps 10-12)"):
-        files = {"Validation vs 2020 output drop": "validation_summary.csv",
-                 "Agreement between methods, by industry": "agreement_by_industry.csv",
-                 "Sensitivity: drop one indicator": "sensitivity.csv",
-                 "Backtest of live alert rules (python backtest.py)": "backtest_summary.csv"}
-        for title, f in files.items():
-            path = os.path.join(CLEAN, f)
-            if os.path.exists(path):
-                st.markdown(f"**{title}**")
-                st.dataframe(pd.read_csv(path, dtype={"naics": str}).round(3), width="stretch",
-                             hide_index=True)
-            else:
-                st.info(f"Run `python -m src.validate` to create {f}.")
+
+# ------------------------------- reports -------------------------------
+section("reports", "Reports", "Model checks: validation, agreement between methods, sensitivity and backtest.")
+# ------------------------------- model checks -------------------------------
+with st.container(border=True):
+    files = {"Validation vs 2020 output drop": "validation_summary.csv",
+             "Agreement between methods, by industry": "agreement_by_industry.csv",
+             "Sensitivity: drop one indicator": "sensitivity.csv",
+             "Backtest of live alert rules (python backtest.py)": "backtest_summary.csv"}
+    for title, f in files.items():
+        path = os.path.join(CLEAN, f)
+        if os.path.exists(path):
+            st.markdown(f"**{title}**")
+            st.dataframe(pd.read_csv(path, dtype={"naics": str}).round(3), width="stretch",
+                         hide_index=True)
+        else:
+            st.info(f"Run `python -m src.validate` to create {f}.")

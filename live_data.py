@@ -178,6 +178,56 @@ def daily_price(name: str) -> pd.DataFrame:
     return df if len(df) else fred_daily(fred_id)
 
 
+# ---------------------------------------------------------------- GLOBAL DISASTERS (GDACS)
+GDACS_TYPES = {"TC": "Tropical cyclone", "EQ": "Earthquake", "FL": "Flood", "VO": "Volcano",
+               "WF": "Wildfire", "DR": "Drought"}
+
+
+@st.cache_data(ttl=1800, show_spinner=False)          # refresh every 30 minutes
+def _gdacs(event_type: str, from_date: str, to_date: str) -> list:
+    r = requests.get("https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH",
+                     params={"eventlist": event_type, "fromDate": from_date, "toDate": to_date,
+                             "alertlevel": "Green;Orange;Red", "pageSize": 100},
+                     headers=HEADERS, timeout=25)
+    r.raise_for_status()
+    out = []
+    for f in r.json().get("features", []):
+        p, g = f.get("properties", {}), f.get("geometry") or {}
+        if g.get("type") != "Point":
+            continue
+        if str(p.get("iscurrent", "true")).lower() == "false":
+            continue
+        lon, lat = g["coordinates"][:2]
+        sev = p.get("severitydata") or {}
+        out.append({"type": event_type, "kind": GDACS_TYPES[event_type],
+                    "name": p.get("eventname") or p.get("name") or "",
+                    "alert": (p.get("alertlevel") or "Green").title(),
+                    "country": p.get("country") or "", "lat": float(lat), "lon": float(lon),
+                    "severity": sev.get("severitytext", "") if isinstance(sev, dict) else "",
+                    "from": str(p.get("fromdate", ""))[:10], "to": str(p.get("todate", ""))[:10]})
+    return out
+
+
+def gdacs_events(days: int = 14) -> list:
+    """Current worldwide disasters from GDACS (UN / European Commission). Empty list on failure."""
+    today = dt.date.today()
+    frm, to = (today - dt.timedelta(days=days)).isoformat(), (today + dt.timedelta(days=1)).isoformat()
+    events = []
+    for t in GDACS_TYPES:
+        try:
+            events += _gdacs(t, frm, to)
+        except Exception as e:
+            LAST_ERRORS[f"GDACS {t}"] = repr(e)[:200]
+    # keep one entry per event name and type (latest episode)
+    seen, uniq = set(), []
+    for e in sorted(events, key=lambda e: e["to"], reverse=True):
+        key = (e["type"], e["name"], round(e["lat"]), round(e["lon"]))
+        if key not in seen:
+            seen.add(key)
+            uniq.append(e)
+    return uniq
+
+
 # Chokepoints on the main oil routes (IMF PortWatch names are matched with LIKE)
 CHOKEPOINTS = {
     "panama":    {"label": "Panama Canal",       "like": "Panama",    "lat": 9.1,   "lng": -79.7},
@@ -185,6 +235,7 @@ CHOKEPOINTS = {
     "bab":       {"label": "Bab el-Mandeb",      "like": "Mandeb",    "lat": 12.6,  "lng": 43.4},
     "hormuz":    {"label": "Strait of Hormuz",   "like": "Hormuz",    "lat": 26.6,  "lng": 56.3},
     "good_hope": {"label": "Cape of Good Hope",  "like": "Good Hope", "lat": -34.4, "lng": 18.5},
+    "malacca":   {"label": "Malacca Strait",     "like": "Malacca",   "lat": 2.5,   "lng": 101.3},
 }
 PORTS = {
     "port_arthur": {"label": "Port Arthur", "like": "Port Arthur", "lat": 29.87, "lng": -93.93},
@@ -273,6 +324,7 @@ def live_signals() -> dict:
     sig["series"].update({k: traffic_7d(df) for k, df in {**port_df, **choke_df}.items()})
     # Longer price history for the procurement simulator's volatility estimate
     sig["prices_full"] = {"wti": wti, "brent": brent}
+    sig["disasters"] = gdacs_events()
     sig["checked_at"] = dt.datetime.now(ZoneInfo("America/Chicago")).strftime("%b %d, %Y %I:%M %p") + " (Texas time)"
     return sig
 
