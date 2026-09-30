@@ -1,109 +1,114 @@
 """
-Visual styling for the Supply Chain Risk Dashboard.
+Visual style for the Supply Chain Risk Dashboard (light "control room" look).
 
-Usage in app.py (right after st.set_page_config):
-    from ui_style import apply_style, hero
-    apply_style()
-    hero("Supply Chain Risk Dashboard", "subtitle text", ["badge 1", "badge 2"])
+    from ui_style import apply_style, brand_bar, alert_card, pill, section
 """
 
+import html
+
 import streamlit as st
+
+# Status colors are reserved for state (never reused for data series)
+STATUS = {
+    "HIGH":     {"fg": "#B91C1C", "bg": "#FEF2F2", "bd": "#FECACA", "icon": "▲", "label": "High"},
+    "ELEVATED": {"fg": "#C2410C", "bg": "#FFF7ED", "bd": "#FED7AA", "icon": "●", "label": "Elevated"},
+    "MONITOR":  {"fg": "#A16207", "bg": "#FEFCE8", "bd": "#FDE68A", "icon": "◆", "label": "Monitor"},
+    "NORMAL":   {"fg": "#15803D", "bg": "#F0FDF4", "bd": "#BBF7D0", "icon": "✓", "label": "Normal"},
+    "NODATA":   {"fg": "#475569", "bg": "#F8FAFC", "bd": "#E2E8F0", "icon": "–", "label": "No data"},
+}
 
 _CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
-html, body, [class*="css"], .stMarkdown, .stText, .stMetric, button, input, select {
+html, body, [class*="css"], .stMarkdown, button, input, select, textarea {
     font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
 }
-
-/* Page background: soft glow behind the content */
-[data-testid="stAppViewContainer"] {
-    background:
-        radial-gradient(1200px 600px at 85% -10%, rgba(59,130,246,0.14), transparent 60%),
-        radial-gradient(900px 500px at -10% 10%, rgba(245,158,11,0.08), transparent 60%),
-        #0B1220;
-}
+[data-testid="stAppViewContainer"] { background: #F4F6FA; }
 [data-testid="stHeader"] { background: transparent; }
-.block-container { padding-top: 2.2rem; max-width: 1400px; }
+.block-container { padding-top: 1.2rem; max-width: 1440px; }
 
-/* Sidebar */
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0F1A30 0%, #0B1220 100%);
-    border-right: 1px solid rgba(148,163,184,0.15);
-}
-[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
-    color: #FBBF24;
-}
+/* Sidebar: dark navy rail like a product app */
+[data-testid="stSidebar"] { background: #0F1B33; }
+[data-testid="stSidebar"] * { color: #E2E8F0; }
+[data-testid="stSidebar"] [data-baseweb="select"] * { color: #0F172A; }
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { color: #FFFFFF; }
 
-/* Section headings */
-h2, h3 {
-    font-weight: 700 !important;
-    letter-spacing: -0.2px;
-    padding-bottom: .35rem;
-    border-bottom: 1px solid rgba(148,163,184,0.15);
+/* Tabs as a top navigation bar */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 4px;
 }
+.stTabs [data-baseweb="tab"] { height: 40px; padding: 0 16px; border-radius: 8px; font-weight: 600; }
+.stTabs [aria-selected="true"] { background: #EFF4FF; color: #1D4ED8 !important; }
+.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
 
-/* KPI cards (st.metric) */
+/* Cards */
+[data-testid="stVerticalBlockBorderWrapper"] { background: #FFFFFF; border-radius: 14px; }
 [data-testid="stMetric"] {
-    background: linear-gradient(160deg, rgba(30,41,66,0.85), rgba(17,27,46,0.85));
-    border: 1px solid rgba(148,163,184,0.18);
-    border-radius: 16px;
-    padding: 16px 18px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 12px 14px;
 }
-[data-testid="stMetricLabel"] { color: #94A3B8 !important; font-weight: 600; }
-[data-testid="stMetricValue"] { color: #F8FAFC !important; font-weight: 800; }
+[data-testid="stMetricLabel"] { color: #64748B !important; font-weight: 600; }
+[data-testid="stMetricValue"] { color: #0F172A !important; font-weight: 700; font-size: 26px !important; }
+h2, h3 { font-weight: 700 !important; letter-spacing: -0.2px; color: #0F172A; }
 
-/* Charts sit on cards too */
-[data-testid="stPlotlyChart"] {
-    background: rgba(17,27,46,0.6);
-    border: 1px solid rgba(148,163,184,0.15);
-    border-radius: 16px;
-    padding: 8px;
-}
+/* Brand bar */
+.brand { display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+         background:#FFFFFF; border:1px solid #E2E8F0; border-radius:14px; padding:14px 18px; }
+.brand .logo { width:40px; height:40px; border-radius:10px; background:#1D4ED8; color:#fff;
+               display:flex; align-items:center; justify-content:center; font-weight:800; font-size:18px; }
+.brand .name { font-weight:800; font-size:20px; color:#0F172A; line-height:1.1; }
+.brand .sub  { font-size:13px; color:#64748B; }
+.brand .right { margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.brand .meta { font-size:12.5px; color:#64748B; }
 
-/* Hero header */
-.hero-kicker {
-    display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: 1.4px;
-    text-transform: uppercase; color: #FBBF24;
-    background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.35);
-    padding: 4px 10px; border-radius: 999px; margin-bottom: 14px;
-}
-.hero-title {
-    font-size: 46px; line-height: 1.05; font-weight: 800; letter-spacing: -1px; margin: 0 0 12px 0;
-    background: linear-gradient(90deg, #F8FAFC 0%, #93C5FD 55%, #FBBF24 100%);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-.hero-sub { font-size: 16px; color: #CBD5E1; line-height: 1.55; max-width: 620px; }
-.hero-badges { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; }
-.hero-badge {
-    font-size: 12.5px; font-weight: 600; color: #E2E8F0;
-    background: rgba(30,41,66,0.9); border: 1px solid rgba(148,163,184,0.25);
-    padding: 5px 11px; border-radius: 999px;
-}
-@media (max-width: 800px) { .hero-title { font-size: 34px; } }
+/* Pills */
+.pill { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700;
+        padding:4px 10px; border-radius:999px; border:1px solid; white-space:nowrap; }
+
+/* Alert cards */
+.acard { border:1px solid; border-radius:14px; padding:14px 16px; height:100%;
+         display:flex; flex-direction:column; gap:6px; min-height:170px; }
+.acard .top { display:flex; align-items:center; gap:10px; }
+.acard .ico { width:34px; height:34px; border-radius:9px; display:flex; align-items:center;
+              justify-content:center; font-size:17px; color:#fff; flex-shrink:0; }
+.acard .kind { font-size:13px; font-weight:700; }
+.acard .when { margin-left:auto; font-size:11.5px; color:#64748B; white-space:nowrap; }
+.acard .head { font-size:16px; font-weight:700; color:#0F172A; line-height:1.3; }
+.acard .body { font-size:13px; color:#334155; line-height:1.45; }
+.section-sub { font-size:13px; color:#64748B; margin-top:-8px; margin-bottom:6px; }
 </style>
 """
 
 
 def apply_style() -> None:
-    """Inject the custom CSS. Call once, near the top of app.py."""
     st.markdown(_CSS, unsafe_allow_html=True)
 
 
-def hero(title: str, subtitle: str, badges=None, kicker: str = "Engineering Management Project") -> None:
-    """Large header block with a gradient title and small info badges."""
-    badges = badges or []
-    badge_html = "".join(f'<span class="hero-badge">{b}</span>' for b in badges)
+def pill(level: str, text: str = None) -> str:
+    s = STATUS.get(level, STATUS["NODATA"])
+    return (f'<span class="pill" style="color:{s["fg"]};background:{s["bg"]};border-color:{s["bd"]}">'
+            f'{s["icon"]} {html.escape(text or s["label"])}</span>')
+
+
+def brand_bar(title: str, subtitle: str, right_html: str = "") -> None:
     st.markdown(
-        f"""
-        <div style="padding-top:18px">
-          <div class="hero-kicker">{kicker}</div>
-          <div class="hero-title">{title}</div>
-          <div class="hero-sub">{subtitle}</div>
-          <div class="hero-badges">{badge_html}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        f"""<div class="brand"><div class="logo">SC</div>
+        <div><div class="name">{html.escape(title)}</div><div class="sub">{html.escape(subtitle)}</div></div>
+        <div class="right">{right_html}</div></div>""", unsafe_allow_html=True)
+
+
+def alert_card(level: str, kind: str, icon: str, head: str, body: str, when: str = "") -> None:
+    s = STATUS.get(level, STATUS["NODATA"])
+    st.markdown(
+        f"""<div class="acard" style="background:{s['bg']};border-color:{s['bd']}">
+        <div class="top"><div class="ico" style="background:{s['fg']}">{icon}</div>
+        <div class="kind" style="color:{s['fg']}">{html.escape(kind)}</div>
+        <div class="when">{html.escape(when)}</div></div>
+        <div class="head">{html.escape(head)}</div>
+        <div class="body">{html.escape(body)}</div>
+        <div>{pill(level)}</div></div>""", unsafe_allow_html=True)
+
+
+def section(title: str, sub: str = "") -> None:
+    st.subheader(title)
+    if sub:
+        st.markdown(f'<div class="section-sub">{html.escape(sub)}</div>', unsafe_allow_html=True)

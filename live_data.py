@@ -169,11 +169,31 @@ def eia_weekly():
 
 
 def daily_price(name: str) -> pd.DataFrame:
-    """WTI or Henry Hub daily price: EIA first (needs key), FRED as backup."""
+    """Daily spot price: EIA first (needs key), FRED as backup.
+    wti = WTI crude, brent = Brent crude ($/bbl); gas = Henry Hub ($/MMBtu)."""
     eia_id, fred_id = {"wti": ("PET.RWTC.D", "DCOILWTICO"),
+                       "brent": ("PET.RBRTE.D", "DCOILBRENTEU"),
                        "gas": ("NG.RNGWHHD.D", "DHHNGSP")}[name]
     df = eia_series(eia_id)
     return df if len(df) else fred_daily(fred_id)
+
+
+# Chokepoints on the main oil routes (IMF PortWatch names are matched with LIKE)
+CHOKEPOINTS = {
+    "panama":    {"label": "Panama Canal",       "like": "Panama",    "lat": 9.1,   "lng": -79.7},
+    "suez":      {"label": "Suez Canal",         "like": "Suez",      "lat": 30.6,  "lng": 32.3},
+    "bab":       {"label": "Bab el-Mandeb",      "like": "Mandeb",    "lat": 12.6,  "lng": 43.4},
+    "hormuz":    {"label": "Strait of Hormuz",   "like": "Hormuz",    "lat": 26.6,  "lng": 56.3},
+    "good_hope": {"label": "Cape of Good Hope",  "like": "Good Hope", "lat": -34.4, "lng": 18.5},
+}
+PORTS = {
+    "port_arthur": {"label": "Port Arthur", "like": "Port Arthur", "lat": 29.87, "lng": -93.93},
+    "houston":     {"label": "Houston",     "like": "Houston",     "lat": 29.73, "lng": -95.0},
+}
+
+# Weather events that can actually stop refineries, plants, ports or rail
+SUPPLY_WEATHER = ["hurricane", "tropical storm", "storm surge", "flood", "freeze",
+                  "winter storm", "ice storm", "extreme cold", "blizzard", "tornado"]
 
 
 # ---------------------------------------------------------------- SIGNALS
@@ -186,36 +206,53 @@ def pct_change(df: pd.DataFrame, col: str = "value", recent: int = 5, base: int 
     return None if before == 0 else (now - before) / before * 100
 
 
+def _last_date(df):
+    return None if df is None or df.empty else pd.Timestamp(df["date"].max())
+
+
 def live_signals() -> dict:
     """Collect all live signals and flag the ones that look abnormal."""
     alerts = nws_alerts()
-    wti, gas = daily_price("wti"), daily_price("gas")
+    wti, brent, gas = daily_price("wti"), daily_price("brent"), daily_price("gas")
     refin = eia_weekly()
-    pa = portwatch_daily("Daily_Ports_Data", "Port Arthur", n=400)
-    hou = portwatch_daily("Daily_Ports_Data", "Houston", n=400)
-    pan = portwatch_daily("Daily_Chokepoints_Data", "Panama", n=400)
+    port_df = {k: portwatch_daily("Daily_Ports_Data", v["like"], n=400) for k, v in PORTS.items()}
+    choke_df = {k: portwatch_daily("Daily_Chokepoints_Data", v["like"], n=400)
+                for k, v in CHOKEPOINTS.items()}
 
-    def port_signal(df):
+    def traffic_signal(df):
         col = tanker_column(df) if not df.empty else None
         return pct_change(df, col, recent=7, base=90) if col else None
 
+    # Weather: only supply-relevant events that the NWS rates Severe or Extreme
+    if not alerts.empty:
+        alerts = alerts.copy()
+        alerts["supply_relevant"] = alerts["event"].fillna("").str.lower().apply(
+            lambda e: any(w in e for w in SUPPLY_WEATHER))
+        severe = alerts[alerts["supply_relevant"] & alerts["severity"].isin(["Severe", "Extreme"])]
+    else:
+        severe = alerts
     sig = {
-        "weather":  {"value": len(alerts),
-                     "flag": (not alerts.empty) and alerts["severity"].isin(["Severe", "Extreme"]).any(),
-                     "detail": alerts},
-        "wti":      {"value": pct_change(wti), "last": wti["value"].iloc[-1] if len(wti) else None},
-        "gas":      {"value": pct_change(gas), "last": gas["value"].iloc[-1] if len(gas) else None},
-        "refinery": {"value": refin["value"].iloc[-1] if len(refin) else None},
-        "port_arthur": {"value": port_signal(pa)},
-        "houston":     {"value": port_signal(hou)},
-        "panama":      {"value": port_signal(pan)},
+        "weather": {"value": len(alerts), "relevant": len(severe), "flag": len(severe) > 0,
+                    "detail": alerts, "events": sorted(set(severe["event"])) if len(severe) else []},
+        "wti":   {"value": pct_change(wti),   "last": wti["value"].iloc[-1] if len(wti) else None,
+                  "date": _last_date(wti)},
+        "brent": {"value": pct_change(brent), "last": brent["value"].iloc[-1] if len(brent) else None,
+                  "date": _last_date(brent)},
+        "gas":   {"value": pct_change(gas),   "last": gas["value"].iloc[-1] if len(gas) else None,
+                  "date": _last_date(gas)},
+        "refinery": {"value": refin["value"].iloc[-1] if len(refin) else None, "date": _last_date(refin)},
     }
-    # Thresholds: simple, explainable rules (tune them in your backtest)
+    for k, df in {**port_df, **choke_df}.items():
+        sig[k] = {"value": traffic_signal(df), "date": _last_date(df)}
+
+    # Thresholds: simple, explainable rules (the same ones backtest.py tests)
     sig["wti"]["flag"] = sig["wti"]["value"] is not None and abs(sig["wti"]["value"]) >= 10
     sig["gas"]["flag"] = sig["gas"]["value"] is not None and abs(sig["gas"]["value"]) >= 15
+    sig["brent"]["flag"] = False            # shown for context; WTI carries the oil-price flag
     sig["refinery"]["flag"] = sig["refinery"]["value"] is not None and sig["refinery"]["value"] < 85
-    for k in ("port_arthur", "houston", "panama"):
+    for k in list(PORTS) + list(CHOKEPOINTS):
         sig[k]["flag"] = sig[k]["value"] is not None and sig[k]["value"] <= -25
+
     # Last 12 months of each series, for the trend charts
     def last_year(df, col="value"):
         if df is None or df.empty or col not in df:
@@ -223,7 +260,7 @@ def live_signals() -> dict:
         out = df[["date", col]].rename(columns={col: "value"})
         return out[out["date"] >= out["date"].max() - pd.Timedelta(days=365)]
 
-    def port_7d(df):
+    def traffic_7d(df):
         col = tanker_column(df) if not df.empty else None
         if not col:
             return pd.DataFrame(columns=["date", "value"])
@@ -231,20 +268,34 @@ def live_signals() -> dict:
         d["value"] = d[col].rolling(7, min_periods=7).mean()
         return last_year(d.dropna(subset=["value"]))
 
-    sig["series"] = {
-        "wti": last_year(wti), "gas": last_year(gas), "refinery": last_year(refin),
-        "port_arthur": port_7d(pa), "panama": port_7d(pan),
-    }
+    sig["series"] = {"wti": last_year(wti), "brent": last_year(brent), "gas": last_year(gas),
+                     "refinery": last_year(refin)}
+    sig["series"].update({k: traffic_7d(df) for k, df in {**port_df, **choke_df}.items()})
+    # Longer price history for the procurement simulator's volatility estimate
+    sig["prices_full"] = {"wti": wti, "brent": brent}
     sig["checked_at"] = dt.datetime.now(ZoneInfo("America/Chicago")).strftime("%b %d, %Y %I:%M %p") + " (Texas time)"
     return sig
 
 
+# Signals that count toward an industry's alert level (chokepoints feed the route table)
+INDUSTRY_SIGNALS = ["weather", "wti", "gas", "refinery", "port_arthur", "houston", "panama"]
+FRAGILE = 0.35     # structural score at or above this = fragile industry
+
+
 def alert_level(structural_score: float, sig: dict) -> tuple:
-    """Combine structural risk (0-1) with the number of live warning flags."""
-    flags = sum(1 for k, v in sig.items() if isinstance(v, dict) and v.get("flag"))
-    exposure = structural_score * (1 + 0.5 * flags)
-    if sig["weather"]["flag"] or exposure >= 0.6:
-        return "HIGH", flags
-    if flags >= 1 or exposure >= 0.35:
-        return "ELEVATED", flags
-    return "NORMAL", flags
+    """Live pressure sets the level; the structural score decides whether it reaches HIGH.
+
+    pressure = number of live warning flags (a supply-relevant severe weather alert counts 2)
+      0      -> NORMAL
+      1      -> ELEVATED
+      2 or +  -> HIGH for fragile industries (score >= 0.35), ELEVATED for sturdier ones
+    """
+    flags = [k for k in INDUSTRY_SIGNALS if sig.get(k, {}).get("flag")]
+    pressure = len(flags) + (1 if "weather" in flags else 0)
+    if pressure == 0:
+        level = "NORMAL"
+    elif pressure == 1:
+        level = "ELEVATED"
+    else:
+        level = "HIGH" if structural_score >= FRAGILE else "ELEVATED"
+    return level, len(flags)

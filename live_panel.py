@@ -1,14 +1,14 @@
 """
-"Right now" panel: live signals + alert level + recommended actions.
-
-Usage in app.py (after you know the selected industry and its risk score):
-    from live_panel import render_live_panel
-    render_live_panel(industry_name, risk_score)
+Live parts of the dashboard: alert cards, industry alert box, trend charts.
 """
 
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from live_data import live_signals, alert_level
+
+from live_data import CHOKEPOINTS, PORTS
+from routes import signal_level
+from ui_style import STATUS, alert_card, pill
 
 ACTIONS = {
     "HIGH": [
@@ -24,67 +24,87 @@ ACTIONS = {
     ],
     "NORMAL": ["No action needed. Keep normal ordering."],
 }
-COLORS = {"HIGH": "#EF4444", "ELEVATED": "#F59E0B", "NORMAL": "#22C55E"}
+SIGNAL_LABELS = {"weather": "severe Gulf Coast weather", "wti": "WTI crude price move",
+                 "gas": "natural gas price move", "refinery": "low Gulf Coast refinery use",
+                 "port_arthur": "Port Arthur tanker drop", "houston": "Houston tanker drop",
+                 "panama": "Panama Canal tanker drop"}
+LINE = "#2A78D6"       # single-series trend line
+LINE2 = "#EB6834"      # second series (Brent) where two share one axis
+GUIDE = "#64748B"      # recessive grey for alert lines
 
 
-def _fmt(v, unit="%"):
-    return "no data" if v is None else f"{v:+.1f}{unit}"
+def _when(ts):
+    return f"data through {ts:%b %d}" if ts is not None else ""
 
 
-def _panel(industry_name: str, structural_score: float):
-    with st.spinner("Checking live sources..."):
-        sig = live_signals()
-    level, flags = alert_level(structural_score, sig)
-
-    st.subheader("Right now: live early warning")
-    st.markdown(
-        f"""<div style="border-left:6px solid {COLORS[level]};padding:12px 16px;
-        border-radius:10px;background:rgba(17,27,46,0.7);margin-bottom:12px">
-        <div style="font-size:13px;color:#94A3B8">Alert level for {industry_name}</div>
-        <div style="font-size:30px;font-weight:800;color:{COLORS[level]}">{level}</div>
-        <div style="font-size:13px;color:#CBD5E1">{flags} live warning signal(s) +
-        structural risk score {structural_score:.2f}. Checked {sig['checked_at']}.</div></div>""",
-        unsafe_allow_html=True)
-
+# ------------------------------------------------------------------ alert cards
+def alert_cards(sig: dict) -> None:
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Gulf Coast weather alerts", sig["weather"]["value"],
-              "warning active" if sig["weather"]["flag"] else "none severe", delta_color="off")
-    c2.metric("WTI crude, 5-day vs 60-day", _fmt(sig["wti"]["value"]),
-              "flag" if sig["wti"]["flag"] else "normal", delta_color="off")
-    c3.metric("Henry Hub gas, 5-day vs 60-day", _fmt(sig["gas"]["value"]),
-              "flag" if sig["gas"]["flag"] else "normal", delta_color="off")
-    c4.metric("Gulf Coast refinery use", _fmt(sig["refinery"]["value"], "%").lstrip("+"),
-              "flag" if sig["refinery"]["flag"] else "normal", delta_color="off")
+    w = sig["weather"]
+    with c1:
+        if w["flag"]:
+            alert_card("HIGH", "Weather alert", "🌀", ", ".join(w["events"]),
+                       f"{w['relevant']} supply-relevant severe alert(s) active in Gulf Coast "
+                       "refinery and port counties.", "live")
+        elif w["value"]:
+            names = ", ".join(sorted(set(w["detail"]["event"].dropna())))[:90]
+            alert_card("MONITOR", "Weather alert", "🌦", f"{w['value']} active alert(s), none supply-critical",
+                       names, "live")
+        else:
+            alert_card("NORMAL", "Weather alert", "☀", "No active alerts",
+                       "No National Weather Service alerts in Gulf Coast refinery and port counties.", "live")
+    with c2:
+        _traffic_card(sig, PORTS, "Port disruption", "⚓", "tanker calls")
+    with c3:
+        _traffic_card(sig, CHOKEPOINTS, "Chokepoint traffic", "⛴", "tanker transits")
+    with c4:
+        wti, gas, ref = sig["wti"], sig["gas"], sig["refinery"]
+        if wti["value"] is None:
+            alert_card("NODATA", "Energy prices", "$", "No price data", "EIA price data is not available.")
+        else:
+            lvl = "HIGH" if (wti["flag"] or gas["flag"] or ref["flag"]) else \
+                  "MONITOR" if abs(wti["value"]) >= 5 else "NORMAL"
+            body = (f"Henry Hub gas ${gas['last']:.2f} ({gas['value']:+.1f}%). " if gas["value"] is not None else "") + \
+                   (f"Gulf Coast refinery use {ref['value']:.1f}%." if ref["value"] is not None else "")
+            alert_card(lvl, "Energy prices", "$",
+                       f"WTI ${wti['last']:.2f}/bbl, {wti['value']:+.1f}% (5-day vs 60-day)",
+                       body, _when(wti["date"]))
 
-    c5, c6, c7 = st.columns(3)
-    c5.metric("Port Arthur tanker calls, 7d vs 90d", _fmt(sig["port_arthur"]["value"]),
-              "flag" if sig["port_arthur"]["flag"] else "normal", delta_color="off")
-    c6.metric("Houston tanker calls, 7d vs 90d", _fmt(sig["houston"]["value"]),
-              "flag" if sig["houston"]["flag"] else "normal", delta_color="off")
-    c7.metric("Panama Canal tanker transits, 7d vs 90d", _fmt(sig["panama"]["value"]),
-              "flag" if sig["panama"]["flag"] else "normal", delta_color="off")
 
-    _trends(sig["series"])
+def _traffic_card(sig, places, kind, icon, what):
+    vals = [(k, v["label"], sig[k]["value"]) for k, v in places.items() if sig[k]["value"] is not None]
+    if not vals:
+        alert_card("NODATA", kind, icon, "No traffic data", "IMF PortWatch data is not available.")
+        return
+    k, label, v = min(vals, key=lambda t: t[2])
+    others = ", ".join(f"{lab} {val:+.0f}%" for kk, lab, val in vals if kk != k)
+    alert_card(signal_level(sig, k), kind, icon, f"{label} {what} {v:+.0f}%",
+               f"7-day average vs the previous 90 days. {('Others: ' + others + '.') if others else ''}",
+               _when(sig[k]["date"]))
 
+
+# ------------------------------------------------------------------ industry alert
+def industry_alert(industry: str, score: float, sig: dict, level: str) -> None:
+    s = STATUS[level]
+    flagged = [SIGNAL_LABELS[k] for k in SIGNAL_LABELS if sig.get(k, {}).get("flag")]
+    reason = ", ".join(flagged) if flagged else "no live warning signals"
+    fragile = "fragile" if score >= 0.35 else "sturdier"
+    st.markdown(
+        f"""<div style="border:1px solid {s['bd']};background:{s['bg']};border-left:6px solid {s['fg']};
+        border-radius:12px;padding:14px 18px">
+        <div style="font-size:13px;color:#64748B">Alert level for {industry}</div>
+        <div style="font-size:30px;font-weight:800;color:{s['fg']}">{level}</div>
+        <div style="font-size:13.5px;color:#334155">Live warnings: {reason}. Structural score
+        {score:.2f} ({fragile} industry; HIGH needs 2+ warnings and a score of 0.35 or more).
+        Checked {sig['checked_at']}.</div></div>""", unsafe_allow_html=True)
     st.markdown("**Recommended actions**")
     for a in ACTIONS[level]:
         st.markdown(f"- {a}")
 
-    if not sig["weather"]["detail"].empty:
-        with st.expander("Active weather alerts (National Weather Service)"):
-            st.dataframe(sig["weather"]["detail"], width="stretch", hide_index=True)
 
-    st.caption("Sources: National Weather Service (real time), EIA (daily prices, weekly "
-               "refinery use), IMF PortWatch (daily port calls, 2 to 4 days behind). Thresholds are simple "
-               "rules tested on past events; they are not forecasts.")
-
-
-LINE = "#38bdf8"      # one hue for every trend chart (single series each)
-GUIDE = "#94a3b8"     # recessive grey for alert lines
-
-
-def _trend_chart(df, title, unit, fmt, alert=None, alert_text=""):
-    if df.empty:
+# ------------------------------------------------------------------ charts
+def trend_chart(df, title, unit, fmt, alert=None, alert_text="", height=230):
+    if df is None or df.empty:
         st.caption(f"{title}: no data right now")
         return
     last = df.iloc[-1]
@@ -100,34 +120,26 @@ def _trend_chart(df, title, unit, fmt, alert=None, alert_text=""):
     fig.update_layout(
         title=dict(text=f"{title}  <span style='font-size:12px;color:{GUIDE}'>latest "
                         f"{last['date']:%b %d}: {last['value']:{fmt}} {unit}</span>", font=dict(size=14)),
-        height=230, margin=dict(l=10, r=10, t=40, b=10), showlegend=False,
+        height=height, margin=dict(l=10, r=10, t=40, b=10), showlegend=False,
         hovermode="x unified", xaxis=dict(showgrid=False),
-        yaxis=dict(gridcolor="rgba(148,163,184,0.15)", zeroline=False))
+        yaxis=dict(gridcolor="rgba(100,116,139,0.15)", zeroline=False))
     st.plotly_chart(fig, width="stretch")
 
 
-def _trends(series):
-    st.markdown("**Last 12 months, up to the latest available day**")
-    a, b = st.columns(2)
-    with a:
-        _trend_chart(series["wti"], "WTI crude", "$/bbl", ".2f")
-    with b:
-        _trend_chart(series["gas"], "Henry Hub natural gas", "$/MMBtu", ".2f")
-    c, d = st.columns(2)
-    with c:
-        _trend_chart(series["refinery"], "Gulf Coast refinery use", "%", ".1f",
-                     alert=85, alert_text="alert below 85%")
-    with d:
-        _trend_chart(series["port_arthur"], "Port Arthur tanker calls, 7-day average",
-                     "calls/day", ".1f")
-    st.caption("Structural scores use annual data (latest year 2024, the newest the Census "
-               "has published). The live signals and these charts run up to the latest day "
-               "each source has released.")
-
-
-def render_live_panel(industry_name: str, structural_score: float):
-    """Draw the panel and re-run it every 10 minutes while the page is open."""
-    if hasattr(st, "fragment"):                       # Streamlit 1.37+
-        st.fragment(run_every="10m")(_panel)(industry_name, structural_score)
-    else:
-        _panel(industry_name, structural_score)
+def crude_chart(series: dict, days: int) -> None:
+    """WTI and Brent on one axis (same unit), with direct end labels."""
+    fig = go.Figure()
+    for key, name, color in [("wti", "WTI", LINE), ("brent", "Brent", LINE2)]:
+        df = series.get(key)
+        if df is None or df.empty:
+            continue
+        df = df[df["date"] >= df["date"].max() - pd.Timedelta(days=days)]
+        fig.add_trace(go.Scatter(x=df["date"], y=df["value"], mode="lines", name=name,
+                                 line=dict(color=color, width=2),
+                                 hovertemplate=f"{name} <b>$%{{y:.2f}}</b>/bbl<extra></extra>"))
+        fig.add_annotation(x=df["date"].iloc[-1], y=df["value"].iloc[-1], text=f"{name} ${df['value'].iloc[-1]:.2f}",
+                           showarrow=False, xanchor="left", xshift=6, font=dict(color="#334155", size=12))
+    fig.update_layout(height=340, margin=dict(l=10, r=90, t=10, b=10), hovermode="x unified",
+                      yaxis_title="$ per barrel", legend=dict(orientation="h", y=1.08, x=0),
+                      xaxis=dict(showgrid=False), yaxis=dict(gridcolor="rgba(100,116,139,0.15)"))
+    st.plotly_chart(fig, width="stretch")
