@@ -1,10 +1,12 @@
-"""Supply Chain Risk Dashboard - Streamlit app.
+"""Supply Chain Early Warning & Procurement Intelligence - Streamlit app.
 
 Run from the project folder:
     streamlit run app.py
 
-Needs data/clean/risk_indicators.csv (python -m src.build_dataset).
-Live data needs EIA_KEY in .streamlit/secrets.toml (or Streamlit Cloud secrets).
+Flow: product (HS) -> supplier country -> destination port -> risk index -> what changed ->
+outlook and actions -> order now vs later -> alternative routes -> supplier comparison.
+Needs data/clean/risk_indicators.csv (python -m src.build_dataset) and EIA_KEY, OILPRICE_KEY,
+BLS_KEY in .streamlit/secrets.toml (or Streamlit Cloud secrets).
 """
 import os
 
@@ -14,15 +16,18 @@ import streamlit as st
 
 from src.config import INDUSTRIES, YEARS
 from src.dashboard import LABELS, METHODS, comparison, contributions, load, scored, what_if
+from decision import (evaluate_routes, level_of, render_changes, render_order_simulator,
+                      render_outlook_actions, render_route_table, render_score_card, render_suppliers,
+                      risk_components, combine, supplier_table, what_changed, LEVEL_WORD)
 from globe_component import render_globe
+from lanes import DESTS, ORIGINS, as_map_routes, FREIGHTOS_ERRORS
 from live_data import CHOKEPOINTS, PORTS, alert_level, live_signals
 from live_panel import (alert_cards, freight_panel, crude_chart, industry_alert, product_strip, traffic_panel,
                         trend_chart)
-from products import HORIZONS, REGIONS, product_label, products_for
+from products import HORIZONS, product_label, products_for
 from network import NODES, all_edges, find_alternatives, fmt_days, focus_for, hubs
-from routes import SIGNAL_NAMES, filter_routes, is_exact, map_legend_html, route_map, route_table, route_table_html, signal_level
+from routes import SIGNAL_NAMES, filter_routes, route_table, signal_level
 from risk_map import render_risk_map
-from simulator import render_simulator
 from ui_style import STATUS, apply_style, card_title, left_rail, pill, section, top_bar
 
 # Colors: one fixed color per method (never re-assigned), neutral grey for context.
@@ -30,7 +35,7 @@ METHOD_COLORS = {"Equal": "#2a78d6", "Entropy": "#eb6834", "AHP": "#1baf7a"}
 GREY = "#898781"
 CLEAN = "data/clean"
 
-st.set_page_config(page_title="Supply Chain Risk Pro", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Supply Chain Early Warning", layout="wide", initial_sidebar_state="collapsed")
 apply_style()
 
 
@@ -44,29 +49,46 @@ df = data()
 # ------------------------------- filter state -------------------------------
 PRODUCTS = products_for(INDUSTRIES)
 LABEL_TO_PRODUCT = {product_label(p): p for p in PRODUCTS}
-DEFAULTS = {"f_product": product_label(PRODUCTS[0]), "f_search": "", "f_origin": "All Regions",
-            "f_dest": "All Regions", "f_horizon": "Next 1–3 months"}
+DEFAULT_PRODUCT = next((l for l, p in LABEL_TO_PRODUCT.items() if p["hs"] == "3901"), list(LABEL_TO_PRODUCT)[0])
+DEFAULTS = {"f_product": DEFAULT_PRODUCT, "f_search": "", "f_dest": "Houston, TX",
+            "f_horizon": "Next 1–3 months"}
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
+st.session_state.setdefault("f_supplier", LABEL_TO_PRODUCT[st.session_state["f_product"]]["origins"][0])
 st.session_state.setdefault("method", list(METHODS)[0])
 st.session_state.setdefault("year", max(YEARS))
+st.session_state.setdefault("watchlist", [])
 
 
-def apply_search():
+def on_product():
+    p = LABEL_TO_PRODUCT[st.session_state["f_product"]]
+    if st.session_state.get("f_supplier") not in p["origins"]:
+        st.session_state["f_supplier"] = p["origins"][0]
+    for k in ("sim_price", "sim_qty", "sim_route", "sup_prices", "sup_editor", "sim_quote", "sim_tariff",
+              "sim_sens", "sim_payload"):
+        st.session_state.pop(k, None)
+
+
+def on_search():
     q = st.session_state["f_search"].strip().lower()
     if q:
         hit = next((lab for lab, p in LABEL_TO_PRODUCT.items()
-                    if q in lab.lower() or q in p["desc"].lower()), None)
+                    if q in lab.lower() or q in p["desc"].lower() or q.replace(" ", "") in p["hs"]), None)
         if hit:
             st.session_state["f_product"] = hit
+            on_product()
 
 
 def reset_filters():
     for k, v in DEFAULTS.items():
         st.session_state[k] = v
+    on_product()
 
 
 product = LABEL_TO_PRODUCT[st.session_state["f_product"]]
+if st.session_state["f_supplier"] not in product["origins"]:
+    st.session_state["f_supplier"] = product["origins"][0]
+origin, dest = st.session_state["f_supplier"], st.session_state["f_dest"]
 naics = product["naics"]
 industry = INDUSTRIES[naics]
 method_name = st.session_state["method"]
@@ -75,65 +97,200 @@ year = st.session_state["year"]
 table, weights = scored(df, method)
 row = table[(table["naics"] == naics) & (table["year"] == year)].iloc[0]
 
-# ------------------------------- live data + alert level -------------------------------
+# ------------------------------- live data -------------------------------
 with st.spinner("Checking live sources..."):
     sig = live_signals()
 latest = table[(table["naics"] == naics) & (table["year"] == max(YEARS))]
 latest_score = float(latest["score"].iloc[0]) if not latest.empty else float(row["score"])
 level, n_flags = alert_level(latest_score, sig)
-o_sel, d_sel = st.session_state["f_origin"], st.session_state["f_dest"]
-routes = filter_routes(o_sel, d_sel)
-map_filtered = (o_sel, d_sel) != ("All Regions", "All Regions")
-if not map_filtered:
-    map_note = f"All routes · {len(routes)} lanes"
-elif is_exact(o_sel, d_sel):
-    map_note = f"{o_sel} ↔ {d_sel} · {len(routes)} route{'s' if len(routes) != 1 else ''}"
-else:
-    map_note = f"No direct lane {o_sel} ↔ {d_sel} · showing routes touching either region"
-routes_df = route_table(sig, routes)
 n_alerts = int(sig["weather"]["flag"]) + sum(
     1 for k in list(PORTS) + list(CHOKEPOINTS) if sig.get(k, {}).get("flag")) + int(
     sig["wti"]["flag"] or sig["gas"]["flag"] or sig["refinery"]["flag"])
 
+# ------------------------------- shipment inputs (defaults before widgets draw) -------------------------------
+unit = product["unit"]
+bench_last = sig["series"].get(product["benchmark"])
+live_price = float(bench_last["value"].iloc[-1]) if bench_last is not None and len(bench_last) else None
+default_qty = {"container": 500.0, "tanker": 100000.0, "bulk": 20000.0}[product["freight"]]
+default_price = product["price"] if product["price"] else (live_price or 80.0)
+wci = (sig.get("freight") or {}).get("market", {}).get("DREWRY_WCI_USD")
+st.session_state.setdefault("sim_qty", default_qty)
+st.session_state.setdefault("sim_price", float(default_price))
+st.session_state.setdefault("sim_payload", float(product.get("payload", 20.0)))
+st.session_state.setdefault("sim_box", float(round(wci["value"])) if wci else 4000.0)
+st.session_state.setdefault("sim_quote", 3.0 if product["freight"] == "tanker" else 35.0)
+st.session_state.setdefault("sim_tariff", 0.0 if product["hs"] == "2709" else 5.0)
+st.session_state.setdefault("sim_allow", 5.0)
+st.session_state.setdefault("sim_sens", 1.0 if product["hs"] in ("2709", "2710") else 0.5)
+st.session_state.setdefault("w_cost", 0.4)
+st.session_state.setdefault("w_time", 0.3)
+st.session_state.setdefault("w_risk", 0.3)
+
+routes_df, boxes = evaluate_routes(
+    sig, product, origin, dest, latest_score, st.session_state["sim_qty"], st.session_state["sim_payload"],
+    st.session_state["sim_box"], st.session_state["sim_quote"],
+    st.session_state["w_cost"], st.session_state["w_time"], st.session_state["w_risk"])
+best_key = routes_df.loc[routes_df["best"], "key"].iloc[0]
+if st.session_state.get("sim_route") not in list(routes_df["key"]):
+    st.session_state["sim_route"] = best_key
+chosen = routes_df[routes_df["key"] == st.session_state["sim_route"]].iloc[0]
+
 left_rail(n_alerts)
 top_bar(n_alerts, sig["checked_at"])
 
-# ------------------------------- filter bar -------------------------------
+# ------------------------------- ① filter bar -------------------------------
 st.markdown('<div id="filters" class="anchor"></div>', unsafe_allow_html=True)
-with st.form("filters_form", border=False):
-    c = st.columns([2.1, 2.1, 1.35, 1.35, 1.45, 0.75, 0.55], vertical_alignment="bottom")
-    c[0].selectbox("HS Code or Product Code", list(LABEL_TO_PRODUCT), key="f_product",
-                 help="Click and type to search, for example 2709 or crude.")
-    c[1].text_input("Or search by product name", key="f_search", placeholder="Search product or HS code...")
-    c[2].selectbox("Origin", REGIONS, key="f_origin")
-    c[3].selectbox("Destination", REGIONS, key="f_dest")
-    c[4].selectbox("Time Horizon", list(HORIZONS), key="f_horizon")
-    c[5].form_submit_button("Apply", type="primary", width="stretch", on_click=apply_search)
-    c[6].form_submit_button("Reset", width="stretch", on_click=reset_filters)
+with st.container(border=True):
+    c = st.columns([2.2, 1.9, 1.5, 1.6, 1.3, 0.6], vertical_alignment="bottom")
+    c[0].selectbox("① Product / HS code", list(LABEL_TO_PRODUCT), key="f_product", on_change=on_product,
+                   help="Click and type to search, for example 3901 or polyethylene.")
+    c[1].text_input("Or search product / HS code", key="f_search", on_change=on_search,
+                    placeholder="e.g. polyethylene, 5503, crude")
+    c[2].selectbox("② Supplier country", product["origins"], key="f_supplier")
+    c[3].selectbox("Destination port", list(DESTS), key="f_dest")
+    c[4].selectbox("Time horizon", list(HORIZONS), key="f_horizon")
+    c[5].button("Reset", on_click=reset_filters, width="stretch")
 
-product_strip(product, sig, [r["name"] for r in routes])
+lane_names = [f"Route {r.key}: {r.name}" for r in routes_df.itertuples()]
+product_strip(product, sig, [f"{origin} ({ORIGINS[origin]['port']}) → {dest}"] + lane_names[:2])
+
+# watchlist
+w1, w2 = st.columns([1, 5], vertical_alignment="center")
+if w1.button("☆ Add to watchlist", width="stretch"):
+    item = (st.session_state["f_product"], origin, dest)
+    if item not in st.session_state["watchlist"]:
+        st.session_state["watchlist"].append(item)
+if st.session_state["watchlist"]:
+    chips = []
+    for lab, o, d in st.session_state["watchlist"]:
+        p = LABEL_TO_PRODUCT[lab]
+        opts, _ = evaluate_routes(sig, p, o, d, latest_score, default_qty, p.get("payload", 20.0),
+                                  st.session_state["sim_box"], st.session_state["sim_quote"])
+        b = opts.loc[opts["best"]].iloc[0]
+        sc = combine(risk_components(sig, p, o, d, b["option"], latest_score)[0])
+        chips.append(pill(level_of(sc), f"HS {p['hs']} {p['name']} · {o} → {d.split(',')[0]} · {sc:.0f}"))
+    w2.markdown("<div style='display:flex;gap:6px;flex-wrap:wrap'><b style='font-size:13px'>My watchlist:</b> "
+                + " ".join(chips) + "</div>", unsafe_allow_html=True)
+else:
+    w2.caption("Add product + supplier + port combinations to monitor them side by side (kept for this browser "
+               "session).")
+
+# ------------------------------- ③ ④ ⑤ decision center -------------------------------
+st.markdown('<div class="sect" id="decision">Supply Chain Risk Index</div>'
+            f'<div class="csub">HS {product["hs"]} {product["name"]} · {origin} → {dest} · scored on '
+            f'Route {chosen["key"]} ({chosen["name"]})</div>', unsafe_allow_html=True)
+k1, k2, k3 = st.columns([1.05, 1.1, 1.15], gap="small")
+with k2, st.container(border=True):
+    card_title("④ What changed?")
+    days = {"Since yesterday": 1, "Last 7 days": 7}[
+        (st.segmented_control("Period", ["Since yesterday", "Last 7 days"], default="Last 7 days",
+                              key="chg_period", label_visibility="collapsed")
+         if hasattr(st, "segmented_control") else "Last 7 days") or "Last 7 days"]
+    res = what_changed(sig, product, origin, dest, chosen["option"], latest_score, days)
+    render_changes(res, days)
+with k1, st.container(border=True):
+    card_title("③ Live risk score", "0–100 for this product and lane · Low &lt; 45 · Medium 45–69 · High 70+")
+    render_score_card(res)
+with k3, st.container(border=True):
+    card_title("⑤ What happens next & what to consider")
+    render_outlook_actions(sig, product, res, origin, dest)
+
 alert_cards(sig)
 
-# ------------------------------- map | traffic | routes -------------------------------
-m, t, r = st.columns([1.3, 0.95, 1.1], gap="small")
-with m:
-    render_risk_map(sig, routes, routes_df, height=400, focus=map_filtered, note=map_note)
-with t, st.container(border=True):
-    card_title("Tanker Traffic")
-    traffic_panel(sig)
-with r, st.container(border=True):
-    card_title("Route Risk &amp; Transit Time")
-    st.markdown(route_table_html(routes_df), unsafe_allow_html=True)
-    st.caption("Risk = warning signals on the route (0 Low, 1 Medium, 2+ High). Trend = tanker traffic at "
-               "the route's weakest point. Transit times are typical, without port delays.")
-
-# ------------------------------- simulator -------------------------------
+# ------------------------------- ⑥ order now vs later -------------------------------
 st.markdown('<div id="simulator" class="anchor"></div>', unsafe_allow_html=True)
+st.markdown('<div class="sect">⑥ Order now vs later</div><div class="csub">Estimated landed cost for your '
+            'order at different dates. Your inputs + live prices, freight and risk.</div>', unsafe_allow_html=True)
 with st.container(border=True):
-    render_simulator(sig, level, HORIZONS[st.session_state["f_horizon"]])
+    left, right = st.columns([1, 2.6], gap="medium")
+    with left:
+        a, b = st.columns(2)
+        a.number_input(f"Quantity ({unit})", min_value=1.0, step=10.0 if unit == "t" else 1000.0, key="sim_qty")
+        b.number_input(f"Price ($/{unit})", min_value=0.0, step=10.0 if unit == "t" else 1.0, key="sim_price",
+                       help=("Starts at the live benchmark price." if product["price"] is None else
+                             "Example value. Enter your supplier's quote."))
+        if product["freight"] == "container":
+            a, b = st.columns(2)
+            a.number_input("Tons per 40ft box", min_value=1.0, max_value=30.0, step=1.0, key="sim_payload")
+            b.number_input("Freight $ per 40ft", min_value=0.0, step=100.0, key="sim_box",
+                           help="Used only if the Freightos estimate is unavailable. Default = Drewry World "
+                                "Container Index (global average, not lane-specific).")
+        else:
+            st.number_input(f"Freight quote ($/{unit})", min_value=0.0, step=0.25, key="sim_quote",
+                            help="Your broker's quote. Tanker and bulk rates are paid data.")
+        a, b = st.columns(2)
+        a.number_input("Tariff & fees (%)", min_value=0.0, max_value=100.0, step=0.5, key="sim_tariff",
+                       help="Look up the rate for this HS code in the U.S. tariff schedule (hts.usitc.gov).")
+        b.number_input("Max risk allowance (%)", min_value=0.0, max_value=30.0, step=0.5, key="sim_allow",
+                       help="Budget for delays and expediting at a risk score of 100.")
+        st.selectbox("Route", list(routes_df["key"]), key="sim_route",
+                     format_func=lambda k: f"Route {k}: " + routes_df.set_index("key").loc[k, "name"])
+        st.slider("Price sensitivity to benchmark", 0.0, 1.5, step=0.1, key="sim_sens",
+                  help="1.0 = moves like the benchmark (crude). Lower for resins and fibers (assumption).")
+        grow = st.checkbox("Grow freight with the BLS freight trend", value=True, key="sim_grow")
+    with right:
+        render_order_simulator(sig, product, origin, dest, routes_df, boxes, res["now"],
+                               st.session_state["sim_qty"], st.session_state["sim_price"],
+                               st.session_state["sim_tariff"], st.session_state["sim_allow"], grow,
+                               st.session_state["sim_route"], st.session_state["sim_sens"])
+        if product["freight"] == "container":
+            est = routes_df.loc[routes_df["key"] == "A", "est"].iloc[0]
+            if est:
+                st.caption(f"Freight for Route A: Freightos estimate for {boxes} × 40ft "
+                           f"({est['mode']}, {est['t_min']:.0f}–{est['t_max']:.0f} days). Other routes are scaled "
+                           "scenarios. [Freight estimates by Freightos](https://www.freightos.com)")
+            else:
+                st.caption(f"Freight = ${st.session_state['sim_box']:,.0f} per 40ft × {boxes} boxes. Default is the "
+                           "Drewry World Container Index (weekly global average, via OilPriceAPI), not a lane quote. "
+                           "Enter your forwarder's quote in 'Fallback $ per 40ft' for a lane-specific cost. "
+                           "(The free Freightos estimate currently returns no carrier quotes for these lanes.)")
 
+# ------------------------------- ⑦ alternative routes + map -------------------------------
+st.markdown('<div id="routes" class="anchor"></div>', unsafe_allow_html=True)
+st.markdown('<div class="sect">⑦ Alternative routes & suppliers</div><div class="csub">Compare by cost, transit time '
+            'and live disruption risk. Route costs other than the Freightos lane are estimated scenarios.</div>',
+            unsafe_allow_html=True)
+m, rt = st.columns([1.15, 1.25], gap="small")
+with m:
+    all_lanes = st.toggle("Show all main lanes", value=False, key="map_all")
+    if all_lanes:
+        map_routes = filter_routes("All Regions", "All Regions")
+        note = f"All main lanes · {len(map_routes)}"
+    else:
+        map_routes = as_map_routes(origin, dest, [r.option for r in routes_df.itertuples()])
+        note = f"{origin} → {dest.split(',')[0]} · {len(map_routes)} route option(s)"
+    render_risk_map(sig, map_routes, route_table(sig, map_routes), height=420, focus=not all_lanes, note=note)
+with rt, st.container(border=True):
+    card_title("Route comparison", f"{origin} ({ORIGINS[origin]['port']}) → {dest}")
+    render_route_table(routes_df, product)
+    with st.expander("Change what 'best balance' means"):
+        x, y, z = st.columns(3)
+        x.slider("Cost weight", 0.0, 1.0, step=0.1, key="w_cost")
+        y.slider("Time weight", 0.0, 1.0, step=0.1, key="w_time")
+        z.slider("Risk weight", 0.0, 1.0, step=0.1, key="w_risk")
+    b = routes_df.loc[routes_df["best"]].iloc[0]
+    st.markdown(f"**Best balance: Route {b['key']}**, not only because of cost: it has the best mix of cost, "
+                f"{b['days'][0]}–{b['days'][1]} days transit and route risk {b['risk']:.0f}/100 with your weights.")
+
+with st.container(border=True):
+    card_title(f"Supplier comparison: HS {product['hs']} {product['name']} → {dest}",
+               "Edit prices to match your quotes. Overall = 40% landed cost, 30% lead time, 30% risk (lower = better).")
+    st.session_state.setdefault("sup_prices", {c: float(st.session_state["sim_price"]) for c in product["origins"]})
+    ed = st.data_editor(pd.DataFrame({"Supplier country": list(st.session_state["sup_prices"]),
+                                      f"Price ($/{unit})": list(st.session_state["sup_prices"].values())}),
+                        hide_index=True, disabled=["Supplier country"], key="sup_editor", width="stretch")
+    prices = dict(zip(ed["Supplier country"], ed[f"Price ($/{unit})"]))
+    sdf = supplier_table(sig, product, dest, latest_score, st.session_state["sim_qty"],
+                         st.session_state["sim_payload"], st.session_state["sim_box"], st.session_state["sim_quote"],
+                         prices, st.session_state["sim_tariff"], st.session_state["sim_allow"])
+    render_suppliers(sdf, product)
+    st.caption("Lead time = transit on each supplier's best route (production time not included). Risk uses the "
+               "same live index. Mexico is overland, so it avoids ocean chokepoints.")
+
+
+# ------------------------------- more detail below -------------------------------
 # ------------------------------- trade & prices -------------------------------
-section("prices", "Trade &amp; Prices", "Daily EIA spot prices and weekly Gulf Coast refinery use, "
+section("prices", "Prices &amp; Freight", "Daily EIA spot prices and weekly Gulf Coast refinery use, "
         "up to the latest day each source has released.")
 with st.container(border=True):
     rng = {"1M": 31, "3M": 92, "6M": 183, "1Y": 366}
@@ -225,6 +382,19 @@ with y, st.container(border=True):
         if "supply_relevant" in w:
             w["supply_relevant"] = w["supply_relevant"].map({True: "yes", False: "no"})
         st.dataframe(w, width="stretch", hide_index=True, height=260)
+
+t1, t2 = st.columns([1, 1.25], gap="small")
+with t1, st.container(border=True):
+    card_title("Tanker Traffic")
+    traffic_panel(sig)
+with t2, st.container(border=True):
+    card_title("Live signals behind the risk index", "Current value and status of every live signal")
+    rows = "".join(
+        f"<tr><td>{v['label']}</td><td class=num>"
+        f"{(format(sig[k]['value'], '+.0f') + '%') if sig[k]['value'] is not None else 'no data'}</td>"
+        f"<td>{pill(signal_level(sig, k))}</td></tr>" for k, v in {**PORTS, **CHOKEPOINTS}.items())
+    st.markdown('<div class="tbl-wrap"><table class="rt"><tr><th>Place (tanker traffic 7d vs 90d)</th>'
+                f'<th class=num>Change</th><th>Status</th></tr>{rows}</table></div>', unsafe_allow_html=True)
 
 with st.container(border=True):
     card_title(f"Structural risk: {industry}",

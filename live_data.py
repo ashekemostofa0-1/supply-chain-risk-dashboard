@@ -45,6 +45,7 @@ def nws_alerts(states=("TX", "LA")) -> pd.DataFrame:
                 if any(a in area for a in GULF_AREAS):
                     rows.append({"event": p.get("event"), "severity": p.get("severity"),
                                  "area": area, "headline": p.get("headline"),
+                                 "effective": p.get("effective") or p.get("onset"),
                                  "expires": p.get("expires")})
         except Exception:
             continue
@@ -332,7 +333,13 @@ def live_signals() -> dict:
                      "refinery": last_year(refin)}
     sig["series"].update({k: traffic_7d(df) for k, df in {**port_df, **choke_df}.items()})
     # Longer price history for the procurement simulator's volatility estimate
-    sig["prices_full"] = {"wti": wti, "brent": brent}
+    sig["prices_full"] = {"wti": wti, "brent": brent, "gas": gas}
+    # raw daily tanker counts (used to compare today's signals with earlier days)
+    sig["traffic_raw"] = {}
+    for k, d_ in {**port_df, **choke_df}.items():
+        col = tanker_column(d_) if not d_.empty else None
+        if col:
+            sig["traffic_raw"][k] = d_[["date", col]].rename(columns={col: "value"})
     sig["disasters"] = gdacs_events()
     from freight import freight_signals          # free BLS freight indexes + OilPriceAPI market indexes
     sig["freight"] = freight_signals()

@@ -70,11 +70,11 @@ html { scroll-behavior: smooth; }
 .topbar { display: flex; align-items: center; gap: 28px; background: #fff; border: 1px solid #E3E8F0;
           border-radius: 12px; padding: 10px 18px; flex-wrap: wrap; }
 .topbar .brand { display: flex; align-items: center; gap: 10px; }
-.topbar .bname { font-size: 19px; font-weight: 800; color: #0F172A; line-height: 1.1; }
+.topbar .bname { font-size: 17px; font-weight: 800; color: #0F172A; line-height: 1.1; }
 .topbar .bsub { font-size: 12.5px; color: #475569; }
-.topbar nav { display: flex; gap: 6px; flex-wrap: wrap; margin-left: 40px; }
-.topbar nav a { color: #1E293B !important; text-decoration: none !important; font-size: 14px;
-                font-weight: 500; padding: 8px 14px; border-bottom: 2px solid transparent; }
+.topbar nav { display: flex; gap: 2px; flex-wrap: wrap; margin-left: 10px; }
+.topbar nav a { color: #1E293B !important; text-decoration: none !important; font-size: 13.5px;
+                font-weight: 500; padding: 8px 10px; border-bottom: 2px solid transparent; }
 .topbar nav a.on { color: #1D5BD8 !important; border-bottom-color: #1D5BD8; font-weight: 600; }
 .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
 .topbar .bell { position: relative; color: #334155; }
@@ -188,7 +188,7 @@ def apply_style() -> None:
 
 def left_rail(n_alerts: int) -> None:
     items = [("#overview", "home", "Home", True), ("#filters", "box", "Products", False),
-             ("#shipping", "map", "Map", False), ("#alerts", "bell", "Alerts", False),
+             ("#routes", "map", "Routes", False), ("#alerts", "bell", "Alerts", False),
              ("#simulator", "calc", "Simulator", False), ("#reports", "doc", "Reports", False)]
     links = "".join(
         f'<a href="{h}" class="{"on" if on else ""}">{icon(i)}<span>{t}</span>'
@@ -198,15 +198,15 @@ def left_rail(n_alerts: int) -> None:
 
 
 def top_bar(n_alerts: int, checked_at: str, initials: str = "AM") -> None:
-    nav = [("#overview", "Overview", True), ("#prices", "Trade &amp; Prices", False),
-           ("#shipping", "Shipping &amp; Routes", False), ("#alerts", "Risk &amp; Alerts", False),
-           ("#simulator", "Procurement Simulator", False)]
+    nav = [("#overview", "Overview", True), ("#decision", "Risk Index", False),
+           ("#simulator", "Order Now vs Later", False), ("#routes", "Routes &amp; Suppliers", False),
+           ("#prices", "Prices &amp; Freight", False), ("#shipping", "Shipping", False)]
     links = "".join(f'<a href="{h}" class="{"on" if on else ""}">{t}</a>' for h, t, on in nav)
     badge = f'<span class="badge">{n_alerts}</span>' if n_alerts else ""
     st.markdown(
         f"""<div class="topbar" id="overview">
-        <div class="brand">{icon("globe", 36, BLUE)}<div><div class="bname">Supply Chain Risk Pro</div>
-        <div class="bsub">Gulf Coast Oil, Gas &amp; Chemical Supply Intelligence</div></div></div>
+        <div class="brand">{icon("globe", 36, BLUE)}<div><div class="bname">Supply Chain Early Warning &amp; Procurement Intelligence</div>
+        <div class="bsub">Know what changed. Understand why. Estimate what&#39;s next. Compare what to do.</div></div></div>
         <nav>{links}</nav>
         <div class="right"><div class="meta">Live data checked<br>{html.escape(checked_at)}</div>
         <a href="#alerts" class="bell">{icon("bell", 22)}{badge}</a>

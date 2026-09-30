@@ -39,6 +39,10 @@ for m, v in fr["modes"].items():
 for code, v in fr["market"].items():
     print(f"OilPriceAPI {code}:", v)
 LAST_ERRORS.update(FR_ERRORS)
+from lanes import FREIGHTOS_ERRORS, freight_estimate
+for o in ["China", "Netherlands"]:
+    print(f"Freightos {o} -> Houston (1 x 40ft):", freight_estimate(o, "Houston, TX", 1) or "FAILED")
+LAST_ERRORS.update(FREIGHTOS_ERRORS)
 if LAST_ERRORS:
     print("\nErrors:")
     for k, v in LAST_ERRORS.items():
