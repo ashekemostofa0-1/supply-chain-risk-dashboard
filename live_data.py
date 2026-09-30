@@ -90,11 +90,20 @@ def _portwatch_daily(service: str, name_like: str, n: int = 200) -> pd.DataFrame
     """Daily port calls (Daily_Ports_Data) or chokepoint transits
     (Daily_Chokepoints_Data) from IMF PortWatch."""
     try:
-        r = requests.get(f"{PORTWATCH}/{service}/FeatureServer/0/query",
-                         params={"where": f"portname LIKE '%{name_like}%'",
-                                 "outFields": "*", "orderByFields": "date DESC",
-                                 "resultRecordCount": n, "f": "json"},
-                         timeout=30)
+        params = {"where": f"portname LIKE '%{name_like}%'",
+                  "outFields": "date,portname,portcalls_tanker,n_tanker,portcalls,n_total",
+                  "orderByFields": "date DESC", "resultRecordCount": n, "f": "json"}
+        r = None
+        for attempt in range(3):                  # the server is sometimes slow: retry twice
+            try:
+                r = requests.get(f"{PORTWATCH}/{service}/FeatureServer/0/query", params=params, timeout=45)
+                if r.ok and "error" in r.json():  # unknown field for this layer -> ask for all fields
+                    params["outFields"] = "*"
+                    continue
+                break
+            except requests.exceptions.Timeout:
+                if attempt == 2:
+                    raise
         r.raise_for_status()
         df = pd.DataFrame([f["attributes"] for f in r.json().get("features", [])])
         if df.empty:
@@ -325,6 +334,8 @@ def live_signals() -> dict:
     # Longer price history for the procurement simulator's volatility estimate
     sig["prices_full"] = {"wti": wti, "brent": brent}
     sig["disasters"] = gdacs_events()
+    from freight import freight_signals          # free BLS freight indexes + OilPriceAPI market indexes
+    sig["freight"] = freight_signals()
     sig["checked_at"] = dt.datetime.now(ZoneInfo("America/Chicago")).strftime("%b %d, %Y %I:%M %p") + " (Texas time)"
     return sig
 

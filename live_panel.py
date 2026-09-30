@@ -245,3 +245,50 @@ def crude_chart(series: dict, days: int) -> None:
                       paper_bgcolor="rgba(0,0,0,0)",
                       xaxis=dict(showgrid=False), yaxis=dict(gridcolor="rgba(100,116,139,0.15)"))
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+
+
+# ------------------------------------------------------------------ freight market
+FREIGHT_COLORS = {"sea": "#2A78D6", "truck": "#EB6834", "rail": "#1BAF7A"}   # fixed per mode
+
+
+def freight_panel(fr: dict) -> None:
+    from freight import BLS_SERIES, MARKET_CODES
+    cols = st.columns(3 + len(MARKET_CODES))
+    for c, (m, (_, name)) in zip(cols, BLS_SERIES.items()):
+        v = fr["modes"][m]
+        if v["yoy"] is None:
+            c.metric(f"{name} price index", "no data")
+        else:
+            c.metric(f"{name} price index", f"{v['value']:,.1f}", f"{v['yoy']:+.1f}% vs last year",
+                     delta_color="inverse", help=f"U.S. BLS producer price index, month of {v['date']:%b %Y}")
+    for c, (code, (name, unit, what)) in zip(cols[3:], MARKET_CODES.items()):
+        mk = fr["market"].get(code)
+        c.metric(name, f"{mk['value']:,.0f}" if mk else "no key",
+                 help=f"{unit}, {what}. Latest value from OilPriceAPI free tier"
+                      + (f", {mk['date']}" if mk and mk["date"] else "") + ".")
+    df = fr["bls"]
+    if df.empty:
+        st.caption("BLS freight data is not available right now.")
+        return
+    start = df["date"].max() - pd.DateOffset(months=24)
+    fig = go.Figure()
+    for m, (_, name) in BLS_SERIES.items():
+        d = df[(df["mode"] == m) & (df["date"] >= start)]
+        if d.empty:
+            continue
+        base = d["value"].iloc[0]
+        y = d["value"] / base * 100
+        fig.add_trace(go.Scatter(x=d["date"], y=y, mode="lines", name=name,
+                                 line=dict(color=FREIGHT_COLORS[m], width=2),
+                                 hovertemplate=f"{name} <b>%{{y:.1f}}</b><extra></extra>"))
+        fig.add_annotation(x=d["date"].iloc[-1], y=y.iloc[-1], text=f"{name} {y.iloc[-1]:.0f}",
+                           showarrow=False, xanchor="left", xshift=6, font=dict(size=11, color="#334155"))
+    fig.add_hline(y=100, line_dash="dot", line_color=GUIDE, line_width=1)
+    fig.update_layout(height=280, margin=dict(l=10, r=150, t=10, b=10), hovermode="x unified",
+                      yaxis_title=f"Index ({start:%b %Y} = 100)", paper_bgcolor="rgba(0,0,0,0)",
+                      legend=dict(orientation="h", y=1.1, x=0), xaxis=dict(showgrid=False),
+                      yaxis=dict(gridcolor="rgba(100,116,139,0.15)"))
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+    st.caption("Monthly U.S. producer price indexes for freight by mode (BLS), rebased so the start = 100. "
+               "They show freight cost pressure. Route-level tanker rates (VLCC, Suezmax) are paid data "
+               "and are not included.")

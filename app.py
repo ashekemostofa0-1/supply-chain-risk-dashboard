@@ -16,7 +16,7 @@ from src.config import INDUSTRIES, YEARS
 from src.dashboard import LABELS, METHODS, comparison, contributions, load, scored, what_if
 from globe_component import render_globe
 from live_data import CHOKEPOINTS, PORTS, alert_level, live_signals
-from live_panel import (alert_cards, crude_chart, industry_alert, product_strip, traffic_panel,
+from live_panel import (alert_cards, freight_panel, crude_chart, industry_alert, product_strip, traffic_panel,
                         trend_chart)
 from products import HORIZONS, REGIONS, product_label, products_for
 from network import NODES, all_edges, find_alternatives, fmt_days, focus_for, hubs
@@ -142,6 +142,10 @@ with st.container(border=True):
             st.radio("Range", list(rng), index=1, horizontal=True, key="price_range")) or "3M"
     card_title("Crude Oil Benchmarks (WTI and Brent)")
     crude_chart(sig["series"], rng[pick])
+with st.container(border=True):
+    card_title("Freight Market", "Free official freight price indexes by mode (U.S. BLS, monthly) "
+               "and global shipping indexes (OilPriceAPI free tier)")
+    freight_panel(sig["freight"])
 a, b = st.columns(2)
 with a, st.container(border=True):
     trend_chart(sig["series"]["gas"], "Henry Hub natural gas", "$/MMBtu", ".2f")

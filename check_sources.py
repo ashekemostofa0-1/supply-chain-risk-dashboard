@@ -32,6 +32,13 @@ if missing:
                                   "returnDistinctValues": "true", "f": "json"}, timeout=30)
     print("\nAll PortWatch chokepoint names:",
           sorted({f["attributes"]["portname"] for f in r.json().get("features", [])}))
+from freight import ERRORS as FR_ERRORS, freight_signals
+fr = freight_signals()
+for m, v in fr["modes"].items():
+    print(f"BLS freight {m}:", f"OK, {v['value']} ({v['yoy']:+.1f}% yoy, {v['date']:%b %Y})" if v["yoy"] is not None else "FAILED")
+for code, v in fr["market"].items():
+    print(f"OilPriceAPI {code}:", v)
+LAST_ERRORS.update(FR_ERRORS)
 if LAST_ERRORS:
     print("\nErrors:")
     for k, v in LAST_ERRORS.items():

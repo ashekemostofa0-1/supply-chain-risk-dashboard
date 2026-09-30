@@ -30,7 +30,7 @@ def daily_volatility(prices: pd.DataFrame, days: int = 250):
 
 
 def compute_scenarios(prices, start: dt.date, n_months: int, qty_bbl: float, freight: float, duties: float,
-                      z: float = 1.0):
+                      z: float = 1.0, freight_growth: float = 0.0):
     """Rows for start date + 0..n_months-1 months. Range = latest × exp(±z·σ·√trading days ahead)."""
     if prices is None or prices.empty:
         return pd.DataFrame(), {}
@@ -45,9 +45,10 @@ def compute_scenarios(prices, start: dt.date, n_months: int, qty_bbl: float, fre
         days_ahead = max((when - last_date).days, 0) * 252 / 365
         spread = z * sigma * np.sqrt(days_ahead)
         lo, hi = last_price * np.exp(-spread), last_price * np.exp(spread)
-        rows.append({"date": when, "qty": qty_bbl, "p_lo": lo, "p_hi": hi, "freight": freight, "duties": duties,
-                     "l_lo": lo + freight + duties, "l_hi": hi + freight + duties,
-                     "t_lo": (lo + freight + duties) * qty_bbl, "t_hi": (hi + freight + duties) * qty_bbl})
+        fr = freight * (1 + freight_growth) ** m
+        rows.append({"date": when, "qty": qty_bbl, "p_lo": lo, "p_hi": hi, "freight": fr, "duties": duties,
+                     "l_lo": lo + fr + duties, "l_hi": hi + fr + duties,
+                     "t_lo": (lo + fr + duties) * qty_bbl, "t_hi": (hi + fr + duties) * qty_bbl})
     return pd.DataFrame(rows), {"price": last_price, "date": last_date, "sigma": sigma,
                                 "annual_vol": sigma * np.sqrt(252) * 100}
 
@@ -83,12 +84,19 @@ def render_simulator(sig: dict, level: str, horizon_months: int) -> None:
             e, f = st.columns(2)
             freight = e.number_input("Freight quote ($/bbl)", 0.0, 50.0, 3.0, 0.25, key="sim_freight",
                                      help="Your broker's quote. Live tanker freight rates are paid data.")
+            sea = (sig.get("freight") or {}).get("modes", {}).get("sea", {})
+            trend = sea.get("yoy")
+            adjust = st.checkbox(
+                f"Grow freight with the U.S. deep-sea freight trend ({trend:+.1f}% a year, BLS)"
+                if trend is not None else "Grow freight with the deep-sea freight trend (no BLS data now)",
+                value=trend is not None, disabled=trend is None, key="sim_adj")
             duties = f.number_input("Duties & fees ($/bbl)", 0.0, 20.0, 0.10, 0.05, key="sim_duties")
             st.form_submit_button("Run Scenarios", type="primary", width="stretch")
     qty_bbl = qty * (BBL_PER_TONNE if unit.startswith("Metric") else 1)
     bench = "wti" if PORTS[origin] == "US Gulf Coast" else "brent"
+    monthly_growth = (1 + trend / 100) ** (1 / 12) - 1 if (adjust and trend is not None) else 0.0
     table, info = compute_scenarios(sig["prices_full"][bench], start, max(horizon_months, 3),
-                                    qty_bbl, freight, duties)
+                                    qty_bbl, freight, duties, freight_growth=monthly_growth)
     route = _transit(origin, dest)
     with mid:
         card_title("Estimated Landed Cost Scenarios (USD)",
@@ -124,7 +132,8 @@ def render_simulator(sig: dict, level: str, horizon_months: int) -> None:
              "of the volume now." if level == "HIGH" else
              "Live alert is <b>ELEVATED</b>: split the order to spread price risk." if level == "ELEVATED" else
              "Live alert is <b>NORMAL</b>: regular ordering is reasonable."),
-            "Freight uses your quote. Update it when your broker sends a new rate.",
+            "Freight starts from your quote" + (" and grows with the BLS deep-sea freight trend." if monthly_growth
+             else ". Update it when your broker sends a new rate."),
         ]
         st.markdown('<div class="takeaways"><h4>💡 Key Takeaways</h4><ul style="padding-left:18px;margin:0">'
                     + "".join(f"<li>{i}</li>" for i in items) + "</ul></div>", unsafe_allow_html=True)
